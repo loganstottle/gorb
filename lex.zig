@@ -124,7 +124,7 @@ pub const Lexer = struct {
         std.debug.print("Tokens:\n", .{});
 
         for (self.tokens.items) |tok| {
-            std.debug.print("{{ {any} \"{s}\" }}\n", .{ tok.kind, tok.value });
+            std.debug.print("  {{ {any} \"{s}\" }}\n", .{ tok.kind, tok.value });
         }
     }
 };

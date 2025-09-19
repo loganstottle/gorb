@@ -21,6 +21,8 @@ pub fn main() !void {
 
     defer allocator.free(contents);
 
+    std.debug.print("Source: {s}\n", .{contents});
+
     var lexer = Lexer.init(allocator, contents, filename);
     defer lexer.deinit();
 
