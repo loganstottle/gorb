@@ -1,6 +1,20 @@
 const std = @import("std");
 
-pub const TokenKind = enum { NumberLiteral, Identifier, Plus, Minus, Star, Slash, OpenParen, CloseParen };
+pub const TokenKind = enum {
+    Identifier,
+    NumberLiteral,
+
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Colon,
+    SemiColon,
+    Equal,
+    OpenParen,
+    CloseParen,
+    Comma,
+};
 
 pub const Token = struct {
     kind: TokenKind,
@@ -44,14 +58,15 @@ pub const Lexer = struct {
     pub fn consume(self: *Lexer) u8 {
         const result = self.source[self.cursor];
         self.cursor += 1;
+        self.col += 1;
         return result;
     }
 
-    pub fn push_token(self: *Lexer, kind: TokenKind, value: []const u8) !void {
+    pub fn pushToken(self: *Lexer, kind: TokenKind, value: []const u8) !void {
         try self.tokens.append(self.allocator, Token.init(kind, value, self));
     }
 
-    pub fn consume_whitespace(self: *Lexer) !void {
+    pub fn consumeWhitespace(self: *Lexer) !void {
         switch (self.consume()) {
             '\n' => {
                 self.line += 1;
@@ -62,7 +77,7 @@ pub const Lexer = struct {
         }
     }
 
-    pub fn consume_symbol(self: *Lexer) !void {
+    pub fn consumeSymbol(self: *Lexer) !void {
         const char = self.consume();
 
         const kind: TokenKind = switch (char) {
@@ -72,26 +87,32 @@ pub const Lexer = struct {
             '/' => .Slash,
             '(' => .OpenParen,
             ')' => .CloseParen,
+            ':' => .Colon,
+            ';' => .SemiColon,
+            '=' => .Equal,
+            ',' => .Comma,
             else => {
                 std.debug.print("invalid symbol: {c}\n", .{char});
                 return LexerError.InvalidSymbol;
             },
         };
 
-        try self.push_token(kind, self.source[self.cursor - 1 .. self.cursor]);
+        try self.pushToken(kind, self.source[self.cursor - 1 .. self.cursor]);
     }
 
-    pub fn consume_identifier(self: *Lexer) !void {
+    pub fn consumeIdentifier(self: *Lexer) !void {
         const start_idx = self.cursor;
         var end_idx = start_idx;
 
-        while (self.ok() and std.ascii.isAlphanumeric(self.consume()))
+        while (self.ok() and std.ascii.isAlphanumeric(self.peek())) {
             end_idx += 1;
+            _ = self.consume();
+        }
 
-        try self.push_token(.Identifier, self.source[start_idx..end_idx]);
+        try self.pushToken(.Identifier, self.source[start_idx..end_idx]);
     }
 
-    pub fn consume_number(self: *Lexer) !void {
+    pub fn consumeNumber(self: *Lexer) !void {
         const start_idx = self.cursor;
         var end_idx = start_idx;
 
@@ -106,16 +127,16 @@ pub const Lexer = struct {
             end_idx += 1;
         }
 
-        try self.push_token(.NumberLiteral, self.source[start_idx..end_idx]);
+        try self.pushToken(.NumberLiteral, self.source[start_idx..end_idx]);
     }
 
     pub fn tokenize(self: *Lexer) !void {
         while (self.ok()) {
             try switch (self.peek()) {
-                ' ', '\n', '\r', '\t', '\x0B', '\x0C' => self.consume_whitespace(),
-                '0'...'9' => self.consume_number(),
-                '_', 'a'...'z', 'A'...'Z' => self.consume_identifier(),
-                else => self.consume_symbol(),
+                ' ', '\n', '\r', '\t', '\x0B', '\x0C' => self.consumeWhitespace(),
+                '0'...'9' => self.consumeNumber(),
+                '_', 'a'...'z', 'A'...'Z' => self.consumeIdentifier(),
+                else => self.consumeSymbol(),
             };
         }
     }

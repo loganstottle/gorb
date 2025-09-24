@@ -1,5 +1,6 @@
 const std = @import("std");
 const Lexer = @import("lex.zig").Lexer;
+const Parser = @import("parse.zig").Parser;
 
 pub fn main() !void {
     if (std.os.argv.len != 2) {
@@ -32,4 +33,14 @@ pub fn main() !void {
     };
 
     lexer.log();
+
+    var parser = Parser.init(allocator, lexer.tokens.items);
+    try parser.parse();
+    defer parser.deinit();
+
+    std.debug.print("\n\nprogram:\n", .{});
+
+    for (parser.program.items) |statement| {
+        std.debug.print("  {any}\n", .{statement});
+    }
 }
