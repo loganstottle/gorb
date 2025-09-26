@@ -2,18 +2,31 @@ const std = @import("std");
 
 pub const TokenKind = enum {
     Identifier,
-    NumberLiteral,
+    LiteralNumber,
 
-    Plus,
-    Minus,
-    Star,
-    Slash,
-    Colon,
-    SemiColon,
-    Equal,
-    OpenParen,
-    CloseParen,
-    Comma,
+    OperatorPlus,
+    OperatorMinus,
+    OperatorStar,
+    OperatorSlash,
+
+    SymbolColon,
+    SymbolSemiColon,
+    SymbolEqual,
+    SymbolOpenParen,
+    SymbolCloseParen,
+    SymbolComma,
+
+    KeywordMut,
+    KeywordU8,
+    KeywordU16,
+    KeywordU32,
+    KeywordU64,
+    KeywordI8,
+    KeywordI16,
+    KeywordI32,
+    KeywordI64,
+    KeywordF32,
+    KeywordF64,
 };
 
 pub const Token = struct {
@@ -62,11 +75,11 @@ pub const Lexer = struct {
         return result;
     }
 
-    pub fn pushToken(self: *Lexer, kind: TokenKind, value: []const u8) !void {
-        try self.tokens.append(self.allocator, Token.init(kind, value, self));
+    pub fn pushToken(self: *Lexer, kind: TokenKind, value: []const u8) void {
+        self.tokens.append(self.allocator, Token.init(kind, value, self)) catch unreachable;
     }
 
-    pub fn consumeWhitespace(self: *Lexer) !void {
+    pub fn consumeWhitespace(self: *Lexer) void {
         switch (self.consume()) {
             '\n' => {
                 self.line += 1;
@@ -81,23 +94,41 @@ pub const Lexer = struct {
         const char = self.consume();
 
         const kind: TokenKind = switch (char) {
-            '+' => .Plus,
-            '-' => .Minus,
-            '*' => .Star,
-            '/' => .Slash,
-            '(' => .OpenParen,
-            ')' => .CloseParen,
-            ':' => .Colon,
-            ';' => .SemiColon,
-            '=' => .Equal,
-            ',' => .Comma,
+            '+' => .OperatorPlus,
+            '-' => .OperatorMinus,
+            '*' => .OperatorStar,
+            '/' => .OperatorSlash,
+            '(' => .SymbolOpenParen,
+            ')' => .SymbolCloseParen,
+            ':' => .SymbolColon,
+            ';' => .SymbolSemiColon,
+            '=' => .SymbolEqual,
+            ',' => .SymbolComma,
             else => {
                 std.debug.print("invalid symbol: {c}\n", .{char});
                 return LexerError.InvalidSymbol;
             },
         };
 
-        try self.pushToken(kind, self.source[self.cursor - 1 .. self.cursor]);
+        self.pushToken(kind, self.source[self.cursor - 1 .. self.cursor]);
+    }
+
+    pub fn getKeyword(name: []const u8) ?TokenKind {
+        // zig cannot switch on strings
+
+        if (std.mem.eql(u8, name, "mut")) return .KeywordMut;
+        if (std.mem.eql(u8, name, "u8")) return .KeywordU8;
+        if (std.mem.eql(u8, name, "u16")) return .KeywordU16;
+        if (std.mem.eql(u8, name, "u32")) return .KeywordU32;
+        if (std.mem.eql(u8, name, "u64")) return .KeywordU64;
+        if (std.mem.eql(u8, name, "i8")) return .KeywordI8;
+        if (std.mem.eql(u8, name, "i16")) return .KeywordI16;
+        if (std.mem.eql(u8, name, "i32")) return .KeywordI32;
+        if (std.mem.eql(u8, name, "i64")) return .KeywordI64;
+        if (std.mem.eql(u8, name, "f32")) return .KeywordF32;
+        if (std.mem.eql(u8, name, "f64")) return .KeywordF64;
+
+        return null;
     }
 
     pub fn consumeIdentifier(self: *Lexer) !void {
@@ -109,7 +140,8 @@ pub const Lexer = struct {
             _ = self.consume();
         }
 
-        try self.pushToken(.Identifier, self.source[start_idx..end_idx]);
+        const name = self.source[start_idx..end_idx];
+        self.pushToken(Lexer.getKeyword(name) orelse .Identifier, name);
     }
 
     pub fn consumeNumber(self: *Lexer) !void {
@@ -127,7 +159,7 @@ pub const Lexer = struct {
             end_idx += 1;
         }
 
-        try self.pushToken(.NumberLiteral, self.source[start_idx..end_idx]);
+        self.pushToken(.LiteralNumber, self.source[start_idx..end_idx]);
     }
 
     pub fn tokenize(self: *Lexer) !void {

@@ -1,6 +1,7 @@
 const std = @import("std");
 const Lexer = @import("lex.zig").Lexer;
 const Parser = @import("parse.zig").Parser;
+const SemanticAnalyzer = @import("semantic.zig").SemanticAnalyzer;
 
 pub fn main() !void {
     if (std.os.argv.len != 2) {
@@ -22,7 +23,7 @@ pub fn main() !void {
 
     defer allocator.free(contents);
 
-    std.debug.print("Source: {s}\n", .{contents});
+    std.debug.print("Source: \n{s}\n", .{contents});
 
     var lexer = Lexer.init(allocator, contents, filename);
     defer lexer.deinit();
@@ -35,12 +36,16 @@ pub fn main() !void {
     lexer.log();
 
     var parser = Parser.init(allocator, lexer.tokens.items);
-    try parser.parse();
+    parser.parse();
     defer parser.deinit();
 
-    std.debug.print("\n\nprogram:\n", .{});
-
-    for (parser.program.items) |statement| {
+    std.debug.print("\nAST:\n", .{});
+    for (parser.program.items) |statement|
         std.debug.print("  {any}\n", .{statement});
-    }
+
+    var semantic_analyzer = SemanticAnalyzer.init(allocator, parser.program);
+    defer semantic_analyzer.deinit();
+
+    std.debug.print("\nSemantics:\n", .{});
+    semantic_analyzer.analyze();
 }
