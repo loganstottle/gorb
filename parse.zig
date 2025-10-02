@@ -31,9 +31,21 @@ pub const BinaryOperator = enum {
     Subtract,
     Multiply,
     Divide,
+    Equal,
+    NotEqual,
+    Greater,
+    GreaterEqual,
+    Less,
+    LessEqual,
+    OrOr,
+    AndAnd,
 
     pub fn precedence(self: BinaryOperator) u8 {
         return switch (self) {
+            .OrOr => 6,
+            .AndAnd => 5,
+            .Equal, .NotEqual => 4,
+            .Greater, .Less, .GreaterEqual, .LessEqual => 3,
             .Add, .Subtract => 2,
             .Multiply, .Divide => 1,
         };
@@ -153,6 +165,14 @@ pub const Parser = struct {
             .OperatorMinus => .Subtract,
             .OperatorStar => .Multiply,
             .OperatorSlash => .Divide,
+            .SymbolEqualEqual => .Equal,
+            .SymbolBangEqual => .NotEqual,
+            .SymbolGreater => .Greater,
+            .SymbolGreaterEqual => .GreaterEqual,
+            .SymbolLess => .Less,
+            .SymbolLessEqual => .LessEqual,
+            .SymbolOrOr => .OrOr,
+            .SymbolAndAnd => .AndAnd,
             else => null,
         };
     }

@@ -2,6 +2,7 @@ const std = @import("std");
 const Lexer = @import("lex.zig").Lexer;
 const Parser = @import("parse.zig").Parser;
 const SemanticAnalyzer = @import("semantic.zig").SemanticAnalyzer;
+const IREmitter = @import("ir.zig").IREmitter;
 
 pub fn main() !void {
     if (std.os.argv.len != 2) {
@@ -33,19 +34,27 @@ pub fn main() !void {
         return;
     };
 
-    lexer.log();
+    //lexer.log();
 
     var parser = Parser.init(allocator, lexer.tokens.items);
     parser.parse();
     defer parser.deinit();
 
-    std.debug.print("\nAST:\n", .{});
-    for (parser.program.items) |statement|
-        std.debug.print("  {any}\n", .{statement});
+    //std.debug.print("\nAST:\n", .{});
+    //for (parser.program.items) |statement|
+    //    std.debug.print("  {any}\n", .{statement});
 
     var semantic_analyzer = SemanticAnalyzer.init(allocator, parser.program);
     defer semantic_analyzer.deinit();
 
     std.debug.print("\nSemantics:\n", .{});
     semantic_analyzer.analyze();
+
+    var ir_gen = IREmitter.init(allocator);
+    defer ir_gen.deinit();
+
+    ir_gen.emit(parser.program.items);
+
+    std.debug.print("\n\nIR:\n", .{});
+    ir_gen.log();
 }

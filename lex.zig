@@ -12,9 +12,20 @@ pub const TokenKind = enum {
     SymbolColon,
     SymbolSemiColon,
     SymbolEqual,
+    SymbolEqualEqual,
+    SymbolLess,
+    SymbolLessEqual,
+    SymbolGreater,
+    SymbolGreaterEqual,
+    SymbolBang,
+    SymbolBangEqual,
     SymbolOpenParen,
     SymbolCloseParen,
     SymbolComma,
+    SymbolAnd,
+    SymbolAndAnd,
+    SymbolOr,
+    SymbolOrOr,
 
     KeywordMut,
     KeywordU8,
@@ -93,22 +104,59 @@ pub const Lexer = struct {
     pub fn consumeSymbol(self: *Lexer) !void {
         const char = self.consume();
 
-        const kind: TokenKind = switch (char) {
-            '+' => .OperatorPlus,
-            '-' => .OperatorMinus,
-            '*' => .OperatorStar,
-            '/' => .OperatorSlash,
-            '(' => .SymbolOpenParen,
-            ')' => .SymbolCloseParen,
-            ':' => .SymbolColon,
-            ';' => .SymbolSemiColon,
-            '=' => .SymbolEqual,
-            ',' => .SymbolComma,
+        var kind: TokenKind = .Identifier;
+
+        switch (char) {
+            '+' => kind = .OperatorPlus,
+            '-' => kind = .OperatorMinus,
+            '*' => kind = .OperatorStar,
+            '/' => kind = .OperatorSlash,
+            '(' => kind = .SymbolOpenParen,
+            ')' => kind = .SymbolCloseParen,
+            ':' => kind = .SymbolColon,
+            ';' => kind = .SymbolSemiColon,
+            ',' => kind = .SymbolComma,
+            '=' => {
+                if (self.ok() and self.peek() == '=') {
+                    _ = self.consume();
+                    kind = .SymbolEqualEqual;
+                } else kind = .SymbolEqual;
+            },
+            '<' => {
+                if (self.ok() and self.peek() == '=') {
+                    _ = self.consume();
+                    kind = .SymbolLessEqual;
+                } else kind = .SymbolLess;
+            },
+            '>' => {
+                if (self.ok() and self.peek() == '=') {
+                    _ = self.consume();
+                    kind = .SymbolGreaterEqual;
+                } else kind = .SymbolGreater;
+            },
+            '!' => {
+                if (self.ok() and self.peek() == '=') {
+                    _ = self.consume();
+                    kind = .SymbolBangEqual;
+                } else kind = .SymbolBang;
+            },
+            '&' => {
+                if (self.ok() and self.peek() == '&') {
+                    _ = self.consume();
+                    kind = .SymbolAndAnd;
+                } else kind = .SymbolAnd;
+            },
+            '|' => {
+                if (self.ok() and self.peek() == '|') {
+                    _ = self.consume();
+                    kind = .SymbolOrOr;
+                } else kind = .SymbolOr;
+            },
             else => {
                 std.debug.print("invalid symbol: {c}\n", .{char});
                 return LexerError.InvalidSymbol;
             },
-        };
+        }
 
         self.pushToken(kind, self.source[self.cursor - 1 .. self.cursor]);
     }

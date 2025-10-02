@@ -1,0 +1,24 @@
+i32 x = 5;
+i32 y = (3 - x) * 5;
+
+i32 z = f(x, y);
+
+////////////////////
+
+t0 = const.i32 5
+x = store.i32 t0
+
+t1 = const.i32 3
+t2 = load.i32 x
+
+t3 = sub.i32 t1, t2
+t4 = const.i32 5
+
+t5 = mul.i32 t3, t4
+y = store.i32 t5
+
+t7 = load.i32 x
+t8 = load.i32 y
+
+t9 = call f, t7, t8
+z = store.i32 t9
