@@ -2,7 +2,7 @@ const std = @import("std");
 const Lexer = @import("lex.zig").Lexer;
 const Parser = @import("parse.zig").Parser;
 const SemanticAnalyzer = @import("semantic.zig").SemanticAnalyzer;
-const IREmitter = @import("ir.zig").IREmitter;
+const IREmitter = @import("ir.zig").IRModule;
 
 pub fn main() !void {
     if (std.os.argv.len != 2) {
@@ -44,17 +44,20 @@ pub fn main() !void {
     //for (parser.program.items) |statement|
     //    std.debug.print("  {any}\n", .{statement});
 
-    var semantic_analyzer = SemanticAnalyzer.init(allocator, parser.program);
+    var semantic_analyzer = SemanticAnalyzer.init(allocator, parser.functions);
     defer semantic_analyzer.deinit();
 
     std.debug.print("\nSemantics:\n", .{});
     semantic_analyzer.analyze();
 
-    var ir_gen = IREmitter.init(allocator);
-    defer ir_gen.deinit();
+    var ir_module = IREmitter.init(allocator);
+    defer ir_module.deinit();
 
-    ir_gen.emit(parser.program.items);
+    ir_module.emit(parser.functions.items);
 
-    std.debug.print("\n\nIR:\n", .{});
-    ir_gen.log();
+    std.debug.print("{}\n", .{ir_module.functions.items[0].blocks.items.len});
+
+    std.debug.print("\nIR:\n", .{});
+    ir_module.log();
+    for (ir_module.functions.items) |*func| func.dot(func.name);
 }

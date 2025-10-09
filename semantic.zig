@@ -4,6 +4,9 @@ const parse = @import("parse.zig");
 const Expression = parse.Expression;
 const VarDeclare = parse.VarDeclare;
 const VarAssign = parse.VarAssign;
+const IfElse = parse.IfElse;
+const LoopWhile = parse.LoopWhile;
+const FnDeclare = parse.FnDeclare;
 const Statement = parse.Statement;
 const Type = parse.Type;
 
@@ -11,12 +14,12 @@ const Scope = struct { variables: std.StringHashMap(Type) };
 
 pub const SemanticAnalyzer = struct {
     allocator: std.mem.Allocator,
-    program: std.ArrayList(Statement),
+    functions: std.ArrayList(FnDeclare),
     scope_stack: std.ArrayList(Scope) = .empty,
     errors: std.ArrayList([]const u8) = .empty,
 
-    pub fn init(allocator: std.mem.Allocator, program: std.ArrayList(Statement)) SemanticAnalyzer {
-        return .{ .allocator = allocator, .program = program };
+    pub fn init(allocator: std.mem.Allocator, functions: std.ArrayList(FnDeclare)) SemanticAnalyzer {
+        return .{ .allocator = allocator, .functions = functions };
     }
 
     pub fn deinit(self: *SemanticAnalyzer) void {
@@ -44,6 +47,11 @@ pub const SemanticAnalyzer = struct {
 
     pub fn enterScope(self: *SemanticAnalyzer) void {
         self.scope_stack.append(self.allocator, .{ .variables = std.StringHashMap(Type).init(self.allocator) }) catch unreachable;
+    }
+
+    pub fn exitScope(self: *SemanticAnalyzer) void {
+        self.scope_stack.items[self.scope_stack.items.len - 1].variables.deinit();
+        _ = self.scope_stack.pop();
     }
 
     pub fn analyzeVarDeclare(self: *SemanticAnalyzer, var_declare: VarDeclare) void {
@@ -78,15 +86,36 @@ pub const SemanticAnalyzer = struct {
         }
     }
 
-    pub fn analyze(self: *SemanticAnalyzer) void {
-        self.enterScope();
+    pub fn analyzeIfElse(self: *SemanticAnalyzer, if_else: IfElse) void {
+        _ = self;
+        _ = if_else;
+    }
 
-        for (self.program.items) |s| {
-            switch (s) {
-                .var_declare => self.analyzeVarDeclare(s.var_declare),
-                .var_assign => self.analyzeVarAssign(s.var_assign),
-                .expression => self.analyzeExpression(s.expression),
+    pub fn analyzeWhile(self: *SemanticAnalyzer, loop_while: LoopWhile) void {
+        _ = self;
+        _ = loop_while;
+    }
+
+    pub fn analyzeFnDeclare(self: *SemanticAnalyzer, fn_declare: FnDeclare) void {
+        _ = self;
+        _ = fn_declare;
+    }
+
+    pub fn analyze(self: *SemanticAnalyzer) void {
+        for (self.functions.items) |f| {
+            self.enterScope();
+
+            for (f.body.items) |s| {
+                switch (s) {
+                    .expression => |st| self.analyzeExpression(st),
+                    .var_declare => |st| self.analyzeVarDeclare(st),
+                    .var_assign => |st| self.analyzeVarAssign(st),
+                    .if_else => |st| self.analyzeIfElse(st),
+                    .loop_while => |st| self.analyzeWhile(st),
+                }
             }
+
+            self.exitScope();
         }
     }
 };

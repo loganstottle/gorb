@@ -21,6 +21,8 @@ pub const TokenKind = enum {
     SymbolBangEqual,
     SymbolOpenParen,
     SymbolCloseParen,
+    SymbolOpenCurly,
+    SymbolCloseCurly,
     SymbolComma,
     SymbolAnd,
     SymbolAndAnd,
@@ -38,6 +40,11 @@ pub const TokenKind = enum {
     KeywordI64,
     KeywordF32,
     KeywordF64,
+    KeywordVoid,
+    KeywordIf,
+    KeywordElse,
+    KeywordWhile,
+    KeywordFn,
 };
 
 pub const Token = struct {
@@ -113,6 +120,8 @@ pub const Lexer = struct {
             '/' => kind = .OperatorSlash,
             '(' => kind = .SymbolOpenParen,
             ')' => kind = .SymbolCloseParen,
+            '{' => kind = .SymbolOpenCurly,
+            '}' => kind = .SymbolCloseCurly,
             ':' => kind = .SymbolColon,
             ';' => kind = .SymbolSemiColon,
             ',' => kind = .SymbolComma,
@@ -175,6 +184,11 @@ pub const Lexer = struct {
         if (std.mem.eql(u8, name, "i64")) return .KeywordI64;
         if (std.mem.eql(u8, name, "f32")) return .KeywordF32;
         if (std.mem.eql(u8, name, "f64")) return .KeywordF64;
+        if (std.mem.eql(u8, name, "void")) return .KeywordVoid;
+        if (std.mem.eql(u8, name, "if")) return .KeywordIf;
+        if (std.mem.eql(u8, name, "else")) return .KeywordElse;
+        if (std.mem.eql(u8, name, "while")) return .KeywordWhile;
+        if (std.mem.eql(u8, name, "fn")) return .KeywordFn;
 
         return null;
     }
@@ -183,7 +197,7 @@ pub const Lexer = struct {
         const start_idx = self.cursor;
         var end_idx = start_idx;
 
-        while (self.ok() and std.ascii.isAlphanumeric(self.peek())) {
+        while (self.ok() and (std.ascii.isAlphanumeric(self.peek())) or self.peek() == '_') {
             end_idx += 1;
             _ = self.consume();
         }

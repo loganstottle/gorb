@@ -1,17 +1,9 @@
 # GORBLANG
 
-* A custom programming language
-* Making this to learn Zig
-
-### WORKING ON
-* if-else, while, function declarations
-* IR branching & control flow graph
-
-### LATER
-* IR passes
-  * SSA construction
-  * live variable analysis
-  * optimization passes
-* Codegen
-  * focusing on x64 first
-  * graph coloring register allocation
+### NEXT UP
+* dominator tree (Semi-NCA)
+* SSA construction
+* analysis and transformation passes over IR
+* instruction selection (tree/DAG pattern matching)
+* register allocation (graph coloring)
+* maybe target specific peephole optimizations

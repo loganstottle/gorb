@@ -1,0 +1,12 @@
+fn void main() {
+  mut u32 x = 0;
+
+  while x < 100 {
+    if x < 50  x = x + 1;
+    else       x = x + 2;
+  }
+
+  x = 3;
+  if x == 3  x = 4;
+  x = 5;
+}

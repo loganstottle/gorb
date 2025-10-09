@@ -94,16 +94,65 @@ pub const VarDeclare = struct {
 
 pub const VarAssign = struct { name: []const u8, value: *Expression };
 
+pub const Parameter = struct {
+    type: Type,
+    name: []const u8,
+};
+
+pub const IfElse = struct {
+    condition: *Expression,
+    if_block: std.ArrayList(Statement) = .empty,
+    else_block: std.ArrayList(Statement) = .empty,
+};
+
+pub const LoopWhile = struct {
+    condition: *Expression,
+    body: std.ArrayList(Statement) = .empty,
+};
+
+pub const FnSignature = struct {
+    name: []const u8,
+    return_type: Type,
+    parameters: std.ArrayList(Parameter) = .empty,
+};
+
+pub const FnDeclare = struct {
+    signature: FnSignature,
+    body: std.ArrayList(Statement) = .empty,
+
+    pub fn deinit(self: *FnDeclare, allocator: std.mem.Allocator) void {
+        self.signature.parameters.deinit(allocator);
+        for (self.body.items) |st| st.deinit(allocator);
+        self.body.deinit(allocator);
+    }
+};
+
 pub const Statement = union(enum) {
+    expression: *Expression,
     var_declare: VarDeclare,
     var_assign: VarAssign,
-    expression: *Expression,
+    if_else: IfElse,
+    loop_while: LoopWhile,
 
     pub fn deinit(self: Statement, allocator: std.mem.Allocator) void {
         switch (self) {
+            .expression => |s| s.deinit(allocator),
             .var_declare => |s| s.value.deinit(allocator),
             .var_assign => |s| s.value.deinit(allocator),
-            .expression => |s| s.deinit(allocator),
+            .if_else => |s| {
+                s.condition.deinit(allocator);
+
+                for (s.if_block.items) |st| st.deinit(allocator);
+                for (s.else_block.items) |st| st.deinit(allocator);
+
+                @constCast(&s.if_block).deinit(allocator);
+                @constCast(&s.else_block).deinit(allocator);
+            },
+            .loop_while => |s| {
+                s.condition.deinit(allocator);
+                for (s.body.items) |st| st.deinit(allocator);
+                @constCast(&s.body).deinit(allocator);
+            },
         }
     }
 };
@@ -112,15 +161,15 @@ pub const Parser = struct {
     allocator: std.mem.Allocator,
     tokens: []Token,
     cursor: u32 = 0,
-    program: std.ArrayList(Statement) = .empty,
+    functions: std.ArrayList(FnDeclare) = .empty,
 
     pub fn init(allocator: std.mem.Allocator, tokens: []Token) Parser {
         return .{ .allocator = allocator, .tokens = tokens };
     }
 
     pub fn deinit(self: *Parser) void {
-        for (self.program.items) |statement| statement.deinit(self.allocator);
-        self.program.deinit(self.allocator);
+        for (self.functions.items) |*func| func.deinit(self.allocator);
+        self.functions.deinit(self.allocator);
     }
 
     pub fn ok(self: *Parser) bool {
@@ -145,18 +194,20 @@ pub const Parser = struct {
         return tok;
     }
 
-    pub fn expect(self: *Parser, kind: TokenKind) void {
+    pub fn expect(self: *Parser, kind: TokenKind) Token {
         if (!self.ok()) {
             std.debug.print("expected {any}, found EOF\n", .{kind});
             std.process.exit(0);
         }
 
-        const found_kind = self.consume().kind;
+        const tok = self.consume();
 
-        if (found_kind != kind) {
-            std.debug.print("expected {any}, found {any}\n", .{ kind, found_kind });
+        if (tok.kind != kind) {
+            std.debug.print("expected {any}, found {any}\n", .{ kind, tok.kind });
             std.process.exit(0);
         }
+
+        return tok;
     }
 
     pub fn convertBinaryOperator(token: Token) ?BinaryOperator {
@@ -192,6 +243,7 @@ pub const Parser = struct {
             .KeywordI64 => .I64,
             .KeywordF32 => .F32,
             .KeywordF64 => .F64,
+            .KeywordVoid => .Void,
             else => return null,
         };
 
@@ -231,7 +283,7 @@ pub const Parser = struct {
             .SymbolOpenParen => {
                 _ = self.consume();
                 const expr = self.parseExpression();
-                self.expect(.SymbolCloseParen);
+                _ = self.expect(.SymbolCloseParen);
 
                 return expr;
             },
@@ -242,7 +294,62 @@ pub const Parser = struct {
         }
     }
 
-    fn parseExpressionPrec(self: *Parser, min_prec: u32) *Expression {
+    pub fn parseBlock(self: *Parser) std.ArrayList(Statement) {
+        var block: std.ArrayList(Statement) = .empty;
+
+        if (self.peek().kind == .SymbolOpenCurly) {
+            _ = self.expect(.SymbolOpenCurly);
+
+            while (self.peek().kind != .SymbolCloseCurly)
+                block.append(self.allocator, self.parseStatement()) catch unreachable;
+
+            _ = self.expect(.SymbolCloseCurly);
+        } else block.append(self.allocator, self.parseStatement()) catch unreachable;
+
+        return block;
+    }
+
+    pub fn parseIfElse(self: *Parser) Statement {
+        _ = self.expect(.KeywordIf);
+
+        const condition = self.parseExpression();
+        const if_block = self.parseBlock();
+        var else_block: std.ArrayList(Statement) = .empty;
+
+        if (self.ok() and self.peek().kind == .KeywordElse) {
+            _ = self.consume();
+            else_block = self.parseBlock();
+        }
+
+        return .{ .if_else = .{ .condition = condition, .if_block = if_block, .else_block = else_block } };
+    }
+
+    pub fn parseWhile(self: *Parser) Statement {
+        _ = self.expect(.KeywordWhile);
+        return .{ .loop_while = .{ .condition = self.parseExpression(), .body = self.parseBlock() } };
+    }
+
+    pub fn parseFnDeclare(self: *Parser) FnDeclare {
+        _ = self.expect(.KeywordFn);
+
+        const return_type = self.parseType().?;
+
+        const name = self.expect(.Identifier).value;
+        var parameters: std.ArrayList(Parameter) = .empty;
+
+        _ = self.expect(.SymbolOpenParen);
+
+        while (self.peek().kind != .SymbolCloseParen) {
+            parameters.append(self.allocator, .{ .type = self.parseType().?, .name = self.expect(.Identifier).value }) catch unreachable;
+            if (self.peek().kind != .SymbolCloseParen) _ = self.expect(.SymbolComma);
+        }
+
+        _ = self.expect(.SymbolCloseParen);
+
+        return .{ .signature = .{ .name = name, .return_type = return_type, .parameters = parameters }, .body = self.parseBlock() };
+    }
+
+    pub fn parseExpressionPrec(self: *Parser, min_prec: u32) *Expression {
         var lhs = self.parseAtom();
 
         while (self.ok()) {
@@ -269,64 +376,77 @@ pub const Parser = struct {
         return self.parseExpressionPrec(std.math.maxInt(u32));
     }
 
-    pub fn appendExpression(self: *Parser) void {
-        self.program.append(self.allocator, .{ .expression = self.parseExpression() }) catch unreachable;
-    }
-
-    pub fn parseVarDeclare(self: *Parser, typ: Type) void {
+    pub fn parseVarDeclare(self: *Parser, typ: Type) Statement {
         const ident = self.consume();
-        self.expect(.SymbolEqual);
+        _ = self.expect(.SymbolEqual);
 
-        self.program.append(self.allocator, .{
+        return .{
             .var_declare = .{
                 .type = typ,
                 .name = ident.value,
                 .value = self.parseExpression(),
             },
-        }) catch unreachable;
+        };
     }
 
-    pub fn parseVarAssign(self: *Parser) void {
+    pub fn parseVarAssign(self: *Parser) Statement {
         const ident = self.consume();
-        self.expect(.SymbolEqual);
+        _ = self.expect(.SymbolEqual);
 
-        self.program.append(self.allocator, .{ .var_assign = .{ .name = ident.value, .value = self.parseExpression() } }) catch unreachable;
+        return .{ .var_assign = .{ .name = ident.value, .value = self.parseExpression() } };
     }
 
     pub fn parseFnCall(self: *Parser) *Expression {
         const name = self.consume().value;
 
-        self.expect(.SymbolOpenParen);
+        _ = self.expect(.SymbolOpenParen);
 
         const expr = self.allocator.create(Expression) catch unreachable;
         expr.* = .{ .fn_call = .{ .name = name } };
 
         while (self.peek().kind != .SymbolCloseParen) {
             expr.*.fn_call.args.append(self.allocator, self.parseExpression()) catch unreachable;
-            if (self.peek().kind != .SymbolCloseParen) self.expect(.SymbolComma);
+            if (self.peek().kind != .SymbolCloseParen) _ = self.expect(.SymbolComma);
         }
 
-        self.expect(.SymbolCloseParen);
+        _ = self.expect(.SymbolCloseParen);
 
         return expr;
+    }
+
+    pub fn parseStatement(self: *Parser) Statement {
+        var statement: ?Statement = null;
+
+        switch (self.peek().kind) {
+            .KeywordIf => return self.parseIfElse(),
+            .KeywordWhile => return self.parseWhile(),
+            .Identifier => {
+                if (self.okAhead(1) and self.peekAhead(1).kind == .SymbolEqual)
+                    statement = self.parseVarAssign();
+            },
+            else => {
+                if (self.parseType()) |t|
+                    statement = self.parseVarDeclare(t);
+            },
+        }
+
+        if (statement == null)
+            statement = .{ .expression = self.parseExpression() };
+
+        _ = self.expect(.SymbolSemiColon);
+
+        return statement.?;
     }
 
     pub fn parse(self: *Parser) void {
         while (self.ok()) {
             switch (self.peek().kind) {
-                .Identifier => {
-                    if (self.okAhead(1) and self.peekAhead(1).kind == .SymbolEqual) {
-                        self.parseVarAssign();
-                    } else self.appendExpression();
-                },
+                .KeywordFn => self.functions.append(self.allocator, self.parseFnDeclare()) catch unreachable,
                 else => {
-                    if (self.parseType()) |t| {
-                        self.parseVarDeclare(t);
-                    } else self.appendExpression();
+                    std.debug.print("expected function declaration\n", .{});
+                    std.process.exit(0);
                 },
             }
-
-            self.expect(.SymbolSemiColon);
         }
     }
 };
