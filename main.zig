@@ -1,8 +1,11 @@
 const std = @import("std");
-const Lexer = @import("lex.zig").Lexer;
-const Parser = @import("parse.zig").Parser;
-const SemanticAnalyzer = @import("semantic.zig").SemanticAnalyzer;
-const IREmitter = @import("ir.zig").IRModule;
+
+const Lexer = @import("./front/lex.zig").Lexer;
+const Parser = @import("./front/parse.zig").Parser;
+const SemanticAnalyzer = @import("./front/semantic.zig").SemanticAnalyzer;
+const IREmitter = @import("./mid/ir.zig").IRModule;
+const DomTree = @import("./mid/analyze/domtree.zig").DomTree;
+const mem2reg = @import("./mid/transform/mem2reg.zig").mem2reg;
 
 pub fn main() !void {
     if (std.os.argv.len != 2) {
@@ -59,5 +62,25 @@ pub fn main() !void {
 
     std.debug.print("\nIR:\n", .{});
     ir_module.log();
-    for (ir_module.functions.items) |*func| func.dot(func.name);
+    for (ir_module.functions.items) |*func| {
+        func.dbg();
+        func.dot(func.name);
+    }
+
+    var domtree = DomTree.init(allocator, &ir_module.functions.items[0]);
+    domtree.calculate();
+
+    const m = mem2reg(allocator, &ir_module.functions.items[0], domtree.idom);
+
+    var iter = m.keyIterator();
+    while (iter.next()) |key| {
+        if (m.get(key.*)) |phis| {
+            std.debug.print("{s}:", .{key.*});
+
+            var iter2 = phis.keyIterator();
+            while (iter2.next()) |n| std.debug.print(" {}", .{n.*});
+
+            std.debug.print("\n", .{});
+        }
+    }
 }

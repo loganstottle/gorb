@@ -1,5 +1,5 @@
 const std = @import("std");
-const parse = @import("parse.zig");
+const parse = @import("../front/parse.zig");
 
 const Type = parse.Type;
 const BinaryOperator = parse.Type;
@@ -38,11 +38,11 @@ pub const Instruction = union(enum) {
     andand: BinaryOp,
     oror: BinaryOp,
     cmp_eq: BinaryOp,
-    cmp_neq: BinaryOp,
+    cmp_ne: BinaryOp,
     cmp_gt: BinaryOp,
     cmp_lt: BinaryOp,
-    cmp_geq: BinaryOp,
-    cmp_leq: BinaryOp,
+    cmp_ge: BinaryOp,
+    cmp_le: BinaryOp,
     branch: usize,
     branch_if: BranchIf,
 };
@@ -61,6 +61,24 @@ pub const BasicBlock = struct {
     pub fn terminator(self: *BasicBlock) *Instruction {
         return &self.instructions.items[self.instructions.items.len - 1];
     }
+
+    pub fn dbg(self: *BasicBlock) void {
+        std.debug.print("\nDBG: bb{}\n", .{self.id});
+
+        std.debug.print("predecessors: ", .{});
+        for (self.predecessors.items) |pred|
+            std.debug.print("bb{} ", .{pred});
+
+        if (self.predecessors.items.len == 0) std.debug.print("(none)", .{});
+
+        std.debug.print("\nsuccessors: ", .{});
+        for (self.successors.items) |succ|
+            std.debug.print("bb{} ", .{succ});
+
+        if (self.successors.items.len == 0) std.debug.print("(none)", .{});
+
+        std.debug.print("\n", .{});
+    }
 };
 
 pub const ControlFlowGraph = struct {
@@ -69,6 +87,7 @@ pub const ControlFlowGraph = struct {
     blocks: std.ArrayList(BasicBlock) = .empty,
     current_block: usize = 0,
     num_temps: usize = 0,
+    vars: std.ArrayList([]const u8) = .empty,
 
     pub fn init(allocator: std.mem.Allocator, name: []const u8) ControlFlowGraph {
         return ControlFlowGraph{ .allocator = allocator, .name = name };
@@ -91,6 +110,11 @@ pub const ControlFlowGraph = struct {
         self.blocks.deinit(self.allocator);
     }
 
+    pub fn dbg(self: *ControlFlowGraph) void {
+        for (self.blocks.items) |*bb| bb.dbg();
+        std.debug.print("\n", .{});
+    }
+
     pub fn newTemp(self: *ControlFlowGraph) Temp {
         const id = self.num_temps;
         self.num_temps += 1;
@@ -110,6 +134,7 @@ pub const ControlFlowGraph = struct {
 
     pub fn emitAlloca(self: *ControlFlowGraph, name: []const u8) void {
         self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .alloca = .{ .name = name } }) catch unreachable;
+        self.vars.append(self.allocator, name) catch unreachable;
     }
 
     pub fn emitStore(self: *ControlFlowGraph, dest: []const u8, src: Temp) Temp {
@@ -152,8 +177,8 @@ pub const ControlFlowGraph = struct {
         return dest;
     }
 
-    pub fn emitCmpNeq(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .cmp_neq = .{ .dest = dest, .left = left, .right = right } }) catch unreachable;
+    pub fn emitCmpNe(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
+        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .cmp_ne = .{ .dest = dest, .left = left, .right = right } }) catch unreachable;
         return dest;
     }
 
@@ -167,13 +192,13 @@ pub const ControlFlowGraph = struct {
         return dest;
     }
 
-    pub fn emitCmpGeq(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .cmp_geq = .{ .dest = dest, .left = left, .right = right } }) catch unreachable;
+    pub fn emitCmpGe(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
+        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .cmp_ge = .{ .dest = dest, .left = left, .right = right } }) catch unreachable;
         return dest;
     }
 
-    pub fn emitCmpLeq(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .cmp_leq = .{ .dest = dest, .left = left, .right = right } }) catch unreachable;
+    pub fn emitCmpLe(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
+        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .cmp_le = .{ .dest = dest, .left = left, .right = right } }) catch unreachable;
         return dest;
     }
 
@@ -223,11 +248,11 @@ pub const ControlFlowGraph = struct {
                     .Multiply => return self.emitMul(self.newTemp(), left, right),
                     .Divide => return self.emitDiv(self.newTemp(), left, right),
                     .Equal => return self.emitCmpEq(self.newTemp(), left, right),
-                    .NotEqual => return self.emitCmpNeq(self.newTemp(), left, right),
+                    .NotEqual => return self.emitCmpNe(self.newTemp(), left, right),
                     .Greater => return self.emitCmpGt(self.newTemp(), left, right),
                     .Less => return self.emitCmpLt(self.newTemp(), left, right),
-                    .GreaterEqual => return self.emitCmpGeq(self.newTemp(), left, right),
-                    .LessEqual => return self.emitCmpLeq(self.newTemp(), left, right),
+                    .GreaterEqual => return self.emitCmpGe(self.newTemp(), left, right),
+                    .LessEqual => return self.emitCmpLe(self.newTemp(), left, right),
                     .OrOr => return self.emitOrOr(self.newTemp(), left, right),
                     .AndAnd => return self.emitAndAnd(self.newTemp(), left, right),
                 }
@@ -339,8 +364,8 @@ pub const ControlFlowGraph = struct {
                 switch (instruction) {
                     .@"const" => |i| std.debug.print("t{} = const {}\n", .{ i.dest.id, i.value }),
                     .alloca => |i| std.debug.print("{s} = alloca\n", .{i.name}),
-                    .store => |i| std.debug.print("{s} = store t{}\n", .{ i.dest, i.src.id }),
-                    .load => |i| std.debug.print("t{} = load {s}\n", .{ i.dest.id, i.src }),
+                    .store => |i| std.debug.print("store t{} -> {s}\n", .{ i.src.id, i.dest }),
+                    .load => |i| std.debug.print("t{} <- load {s}\n", .{ i.dest.id, i.src }),
                     .call => |i| {
                         std.debug.print("t{} = call {s} ", .{ i.dest.id, i.name });
 
@@ -356,14 +381,14 @@ pub const ControlFlowGraph = struct {
                     .div => |i| std.debug.print("t{} = div t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
                     .andand => |i| std.debug.print("t{} = and t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
                     .oror => |i| std.debug.print("t{} = or t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
-                    .cmp_eq => |i| std.debug.print("t{} = cmp t{} == t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
-                    .cmp_neq => |i| std.debug.print("t{} = cmp t{} != t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
-                    .cmp_gt => |i| std.debug.print("t{} = cmp t{} > t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
-                    .cmp_lt => |i| std.debug.print("t{} = cmp t{} < t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
-                    .cmp_geq => |i| std.debug.print("t{} = cmp t{} >= t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
-                    .cmp_leq => |i| std.debug.print("t{} = cmp t{} <= t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
+                    .cmp_eq => |i| std.debug.print("t{} = cmp eq t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
+                    .cmp_ne => |i| std.debug.print("t{} = cmp ne t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
+                    .cmp_gt => |i| std.debug.print("t{} = cmp gt t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
+                    .cmp_lt => |i| std.debug.print("t{} = cmp lt t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
+                    .cmp_ge => |i| std.debug.print("t{} = cmp ge t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
+                    .cmp_le => |i| std.debug.print("t{} = cmp le t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
                     .branch => |i| std.debug.print("br {s}.{}\n", .{ self.name, i }),
-                    .branch_if => |i| std.debug.print("if t{} br {s}.{} else {s}.{}\n", .{ i.condition.id, self.name, i.true_block, self.name, i.false_block }),
+                    .branch_if => |i| std.debug.print("br t{} {s}.{} {s}.{}\n", .{ i.condition.id, self.name, i.true_block, self.name, i.false_block }),
                 }
             }
         }
