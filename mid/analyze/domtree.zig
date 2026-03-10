@@ -1,35 +1,19 @@
 const std = @import("std");
 
-const ir = @import("../ir.zig");
-
-const ControlFlowGraph = ir.ControlFlowGraph;
+const CFG = @import("../ir.zig").ControlFlowGraph;
+const number_postorder = @import("../../util/traverse.zig").number_postorder;
 
 const UNDEFINED = std.math.maxInt(usize);
 
 pub const DomTree = struct {
     allocator: std.mem.Allocator,
-    cfg: *ControlFlowGraph,
+    cfg: *CFG,
     idom: std.ArrayList(usize) = .empty,
     index: std.ArrayList(usize) = .empty,
     vertex: std.ArrayList(usize) = .empty,
-    visited: std.ArrayList(bool) = .empty,
-    cur: usize = 0,
 
-    pub fn init(allocator: std.mem.Allocator, cfg: *ControlFlowGraph) DomTree {
+    pub fn init(allocator: std.mem.Allocator, cfg: *CFG) DomTree {
         return .{ .allocator = allocator, .cfg = cfg };
-    }
-
-    pub fn number_postorder(self: *DomTree, bb: usize) void {
-        if (self.visited.items[bb]) return;
-        self.visited.items[bb] = true;
-
-        for (self.cfg.blocks.items[bb].successors.items) |succ|
-            self.number_postorder(succ);
-
-        self.index.items[bb] = self.cur;
-        self.vertex.items[self.cur] = bb;
-
-        self.cur += 1;
     }
 
     pub fn intersect(self: *DomTree, b1: usize, b2: usize) usize {
@@ -47,12 +31,12 @@ pub const DomTree = struct {
     pub fn calculate(self: *DomTree) void {
         const n = self.cfg.blocks.items.len;
 
-        self.visited.appendNTimes(self.allocator, false, n) catch unreachable;
         self.idom.appendNTimes(self.allocator, UNDEFINED, n) catch unreachable;
         self.index.appendNTimes(self.allocator, 0, n) catch unreachable;
         self.vertex.appendNTimes(self.allocator, 0, n) catch unreachable;
 
-        self.number_postorder(0);
+        number_postorder(self.cfg, self.allocator, &self.index, &self.vertex);
+        std.debug.print("{} {}\n", .{ self.index, self.vertex });
 
         self.idom.items[0] = 0;
 
@@ -60,7 +44,7 @@ pub const DomTree = struct {
         while (changed) {
             changed = false;
 
-            var i: usize = self.cur - 2;
+            var i: usize = n - 2;
             while (true) {
                 const b = self.vertex.items[i];
 

@@ -69,5 +69,9 @@ pub fn mem2reg(allocator: std.mem.Allocator, cfg: *ControlFlowGraph, idoms: std.
         }
     }
 
+    // todo:
+    //   variable renaming
+    //   phi insertion
+
     return result;
 }

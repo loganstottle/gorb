@@ -1,6 +1,7 @@
 fn void main() {
-  mut u32 x = 0;
+  u32 x = 0;
 
-  if x == 0  x = x + 1;
-  if x != 0  x = x - 1;
+  if x == 0  x = 1;
+
+  x = 2;
 }

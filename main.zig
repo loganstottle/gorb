@@ -6,6 +6,7 @@ const SemanticAnalyzer = @import("./front/semantic.zig").SemanticAnalyzer;
 const IREmitter = @import("./mid/ir.zig").IRModule;
 const DomTree = @import("./mid/analyze/domtree.zig").DomTree;
 const mem2reg = @import("./mid/transform/mem2reg.zig").mem2reg;
+const LLIRModule = @import("./back/x86_64/x86_64.zig").LLIRModule;
 
 pub fn main() !void {
     if (std.os.argv.len != 2) {
@@ -16,7 +17,7 @@ pub fn main() !void {
     const filename = std.mem.span(std.os.argv[1]);
 
     var gpa = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa.deinit();
+    //defer _ = gpa.deinit();
 
     const allocator = gpa.allocator();
 
@@ -67,20 +68,23 @@ pub fn main() !void {
         func.dot(func.name);
     }
 
-    var domtree = DomTree.init(allocator, &ir_module.functions.items[0]);
-    domtree.calculate();
+    // var domtree = DomTree.init(allocator, &ir_module.functions.items[0]);
+    // domtree.calculate();
+    //
+    // const m = mem2reg(allocator, &ir_module.functions.items[0], domtree.idom);
+    //
+    // var iter = m.keyIterator();
+    // while (iter.next()) |key| {
+    //     if (m.get(key.*)) |phis| {
+    //         std.debug.print("{s}:", .{key.*});
+    //
+    //         var iter2 = phis.keyIterator();
+    //         while (iter2.next()) |n| std.debug.print(" {}", .{n.*});
+    //
+    //         std.debug.print("\n", .{});
+    //     }
+    // }
 
-    const m = mem2reg(allocator, &ir_module.functions.items[0], domtree.idom);
-
-    var iter = m.keyIterator();
-    while (iter.next()) |key| {
-        if (m.get(key.*)) |phis| {
-            std.debug.print("{s}:", .{key.*});
-
-            var iter2 = phis.keyIterator();
-            while (iter2.next()) |n| std.debug.print(" {}", .{n.*});
-
-            std.debug.print("\n", .{});
-        }
-    }
+    var llir_module = LLIRModule.init(allocator, &ir_module);
+    llir_module.lower();
 }
