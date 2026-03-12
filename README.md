@@ -1,5 +1,7 @@
 # GORBLANG
 
+## 3rd attempt at a custom programming language
+
 Sample Source:
 ```
 fn void main() {
@@ -12,7 +14,7 @@ fn void main() {
 }
 ```
 
-Emitted IR:
+IR:
 ```
 main:
   x = alloca
@@ -35,14 +37,6 @@ main.3:
   x = store t6
 ```
 
-Control Flow Graph Visualization (via emitted GraphViz .DOT files):
+Control Flow Graph Visualization (GraphViz):
 <br>
 ![CFG Visualization](https://raw.githubusercontent.com/loganstottle/gorb/refs/heads/master/main.svg)
-
-### NEXT UP
-* dominator tree (Semi-NCA)
-* SSA construction
-* analysis and transformation passes over IR
-* instruction selection (tree/DAG pattern matching)
-* register allocation (graph coloring)
-* maybe target specific peephole optimizations

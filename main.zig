@@ -59,8 +59,6 @@ pub fn main() !void {
 
     ir_module.emit(parser.functions.items);
 
-    std.debug.print("{}\n", .{ir_module.functions.items[0].blocks.items.len});
-
     std.debug.print("\nIR:\n", .{});
     ir_module.log();
     for (ir_module.functions.items) |*func| {
@@ -84,7 +82,4 @@ pub fn main() !void {
     //         std.debug.print("\n", .{});
     //     }
     // }
-
-    var llir_module = LLIRModule.init(allocator, &ir_module);
-    llir_module.lower();
 }

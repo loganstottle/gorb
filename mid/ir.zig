@@ -2,7 +2,6 @@ const std = @import("std");
 const parse = @import("../front/parse.zig");
 
 const Type = parse.Type;
-const BinaryOperator = parse.Type;
 const Statement = parse.Statement;
 
 const Expression = parse.Expression;
@@ -45,11 +44,12 @@ pub const Instruction = union(enum) {
     cmp_le: BinaryOp,
     branch: usize,
     branch_if: BranchIf,
+    dead,
 };
 
 pub const BasicBlock = struct {
     id: usize,
-    instructions: std.ArrayList(Instruction) = .empty,
+    instructions: std.ArrayList(usize) = .empty,
     predecessors: std.ArrayList(usize) = .empty,
     successors: std.ArrayList(usize) = .empty,
 
@@ -58,8 +58,8 @@ pub const BasicBlock = struct {
         other.predecessors.append(allocator, self.id) catch unreachable;
     }
 
-    pub fn terminator(self: *BasicBlock) *Instruction {
-        return &self.instructions.items[self.instructions.items.len - 1];
+    pub fn terminator(self: *BasicBlock, instructions: std.ArrayList(Instruction)) *Instruction {
+        return &instructions.items[self.instructions.getLast()];
     }
 
     pub fn dbg(self: *BasicBlock) void {
@@ -84,7 +84,9 @@ pub const BasicBlock = struct {
 pub const ControlFlowGraph = struct {
     allocator: std.mem.Allocator,
     name: []const u8,
-    blocks: std.ArrayList(BasicBlock) = .empty,
+    block_pool: std.ArrayList(BasicBlock) = .empty,
+    blocks: std.ArrayList(usize) = .empty,
+    instruction_pool: std.ArrayList(Instruction) = .empty,
     current_block: usize = 0,
     num_temps: usize = 0,
     vars: std.ArrayList([]const u8) = .empty,
@@ -94,24 +96,28 @@ pub const ControlFlowGraph = struct {
     }
 
     pub fn deinit(self: *ControlFlowGraph) void {
-        for (self.blocks.items) |block| {
-            for (block.instructions.items) |inst| {
+        for (self.blocks.items) |block_id| {
+            var block = self.getBlock(block_id);
+
+            for (block.instructions.items) |inst_id| {
+                const inst = self.instruction_pool.items[inst_id];
+
                 switch (inst) {
-                    .call => |c| @constCast(&c.args).deinit(self.allocator),
+                    .call => |*c| @constCast(&c.args).deinit(self.allocator),
                     else => {},
                 }
             }
 
-            @constCast(&block.instructions).deinit(self.allocator);
-            @constCast(&block.predecessors).deinit(self.allocator);
-            @constCast(&block.successors).deinit(self.allocator);
+            block.instructions.deinit(self.allocator);
+            block.predecessors.deinit(self.allocator);
+            block.successors.deinit(self.allocator);
         }
 
         self.blocks.deinit(self.allocator);
     }
 
     pub fn dbg(self: *ControlFlowGraph) void {
-        for (self.blocks.items) |*bb| bb.dbg();
+        for (self.blocks.items) |block_id| self.getBlock(block_id).dbg();
         std.debug.print("\n", .{});
     }
 
@@ -121,103 +127,119 @@ pub const ControlFlowGraph = struct {
         return .{ .id = id };
     }
 
+    pub fn getBlock(self: *ControlFlowGraph, block_id: usize) *BasicBlock {
+        return &self.block_pool.items[block_id];
+    }
+
+    pub fn currentBlock(self: *ControlFlowGraph) *BasicBlock {
+        return self.getBlock(self.current_block);
+    }
+
     pub fn appendBlock(self: *ControlFlowGraph) usize {
-        const id = self.blocks.items.len;
-        self.blocks.append(self.allocator, BasicBlock{ .id = id }) catch unreachable;
+        const id = self.block_pool.items.len;
+
+        self.block_pool.append(self.allocator, .{ .id = id }) catch unreachable;
+        self.blocks.append(self.allocator, id) catch unreachable;
+
         return id;
     }
 
+    pub fn appendInstruction(self: *ControlFlowGraph, instruction: Instruction) void {
+        self.currentBlock().instructions.append(self.allocator, self.instruction_pool.items.len) catch unreachable;
+        self.instruction_pool.append(self.allocator, instruction) catch unreachable;
+    }
+
     pub fn emitConst(self: *ControlFlowGraph, dest: Temp, value: f64) Temp {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .@"const" = .{ .dest = dest, .value = value } }) catch unreachable;
+        self.appendInstruction(.{ .@"const" = .{ .dest = dest, .value = value } });
         return dest;
     }
 
     pub fn emitAlloca(self: *ControlFlowGraph, name: []const u8) void {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .alloca = .{ .name = name } }) catch unreachable;
+        self.appendInstruction(.{ .alloca = .{ .name = name } });
         self.vars.append(self.allocator, name) catch unreachable;
     }
 
     pub fn emitStore(self: *ControlFlowGraph, dest: []const u8, src: Temp) Temp {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .store = .{ .dest = dest, .src = src } }) catch unreachable;
+        self.appendInstruction(.{ .store = .{ .dest = dest, .src = src } });
         return src;
     }
 
     pub fn emitLoad(self: *ControlFlowGraph, dest: Temp, src: []const u8) Temp {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .load = .{ .dest = dest, .src = src } }) catch unreachable;
+        self.appendInstruction(.{ .load = .{ .dest = dest, .src = src } });
         return dest;
     }
 
     pub fn emitCall(self: *ControlFlowGraph, dest: Temp, name: []const u8, args: std.ArrayList(Temp)) Temp {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .call = .{ .dest = dest, .name = name, .args = args } }) catch unreachable;
+        self.appendInstruction(.{ .call = .{ .dest = dest, .name = name, .args = args } });
         return dest;
     }
 
     pub fn emitAdd(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .add = .{ .dest = dest, .left = left, .right = right } }) catch unreachable;
+        self.appendInstruction(.{ .add = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
     pub fn emitSub(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .sub = .{ .dest = dest, .left = left, .right = right } }) catch unreachable;
+        self.appendInstruction(.{ .sub = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
     pub fn emitMul(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .mul = .{ .dest = dest, .left = left, .right = right } }) catch unreachable;
+        self.appendInstruction(.{ .mul = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
     pub fn emitDiv(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .div = .{ .dest = dest, .left = left, .right = right } }) catch unreachable;
+        self.appendInstruction(.{ .div = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
     pub fn emitCmpEq(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .cmp_eq = .{ .dest = dest, .left = left, .right = right } }) catch unreachable;
+        self.appendInstruction(.{ .cmp_eq = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
     pub fn emitCmpNe(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .cmp_ne = .{ .dest = dest, .left = left, .right = right } }) catch unreachable;
+        self.appendInstruction(.{ .cmp_ne = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
     pub fn emitCmpGt(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .cmp_gt = .{ .dest = dest, .left = left, .right = right } }) catch unreachable;
+        self.appendInstruction(.{ .cmp_gt = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
     pub fn emitCmpLt(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .cmp_lt = .{ .dest = dest, .left = left, .right = right } }) catch unreachable;
+        self.appendInstruction(.{ .cmp_lt = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
     pub fn emitCmpGe(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .cmp_ge = .{ .dest = dest, .left = left, .right = right } }) catch unreachable;
+        self.appendInstruction(.{ .cmp_ge = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
     pub fn emitCmpLe(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .cmp_le = .{ .dest = dest, .left = left, .right = right } }) catch unreachable;
+        self.appendInstruction(.{ .cmp_le = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
     pub fn emitAndAnd(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .andand = .{ .dest = dest, .left = left, .right = right } }) catch unreachable;
+        self.appendInstruction(.{ .andand = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
     pub fn emitOrOr(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .oror = .{ .dest = dest, .left = left, .right = right } }) catch unreachable;
+        self.appendInstruction(.{ .oror = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
     pub fn emitBranch(self: *ControlFlowGraph, block_id: usize) void {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .branch = block_id }) catch unreachable;
+        self.appendInstruction(.{ .branch = block_id });
     }
 
     pub fn emitBranchIf(self: *ControlFlowGraph, condition: Temp, true_block_id: usize, false_block_id: usize) void {
-        self.blocks.items[self.current_block].instructions.append(self.allocator, .{ .branch_if = .{ .condition = condition, .true_block = true_block_id, .false_block = false_block_id } }) catch unreachable;
+        self.appendInstruction(.{ .branch_if = .{ .condition = condition, .true_block = true_block_id, .false_block = false_block_id } });
     }
 
     pub fn emitVarDeclare(self: *ControlFlowGraph, var_declare: VarDeclare) void {
@@ -271,13 +293,13 @@ pub const ControlFlowGraph = struct {
 
         const merge_block = self.appendBlock();
         self.emitBranch(merge_block);
-        self.blocks.items[self.current_block].then(self.allocator, &self.blocks.items[merge_block]);
+        self.currentBlock().then(self.allocator, self.getBlock(merge_block));
 
         self.current_block = merge_block;
-        self.blocks.items[start_block].terminator().branch_if.false_block = merge_block;
+        self.getBlock(start_block).terminator(self.instruction_pool).branch_if.false_block = merge_block;
 
-        self.blocks.items[start_block].then(self.allocator, &self.blocks.items[if_block]);
-        self.blocks.items[start_block].then(self.allocator, &self.blocks.items[merge_block]);
+        self.getBlock(start_block).then(self.allocator, self.getBlock(if_block));
+        self.getBlock(start_block).then(self.allocator, self.getBlock(merge_block));
     }
 
     pub fn emitIfElse(self: *ControlFlowGraph, if_else: IfElse) void {
@@ -292,21 +314,21 @@ pub const ControlFlowGraph = struct {
 
         const else_block = self.appendBlock();
 
-        self.blocks.items[start_block].terminator().branch_if.false_block = else_block;
+        self.getBlock(start_block).terminator(self.instruction_pool).branch_if.false_block = else_block;
         self.current_block = else_block;
         for (if_else.else_block.items) |statement| self.emitStatement(statement);
 
         const merge_block = self.appendBlock();
         self.emitBranch(merge_block);
 
-        self.blocks.items[self.current_block].then(self.allocator, &self.blocks.items[merge_block]);
+        self.currentBlock().then(self.allocator, self.getBlock(merge_block));
 
         self.current_block = merge_block;
-        self.blocks.items[else_block - 1].terminator().branch = merge_block;
-        self.blocks.items[else_block - 1].then(self.allocator, &self.blocks.items[merge_block]);
+        self.getBlock(else_block - 1).terminator(self.instruction_pool).branch = merge_block;
+        self.getBlock(else_block - 1).then(self.allocator, self.getBlock(merge_block));
 
-        self.blocks.items[start_block].then(self.allocator, &self.blocks.items[if_block]);
-        self.blocks.items[start_block].then(self.allocator, &self.blocks.items[else_block]);
+        self.getBlock(start_block).then(self.allocator, self.getBlock(if_block));
+        self.getBlock(start_block).then(self.allocator, self.getBlock(else_block));
     }
 
     pub fn emitConditional(self: *ControlFlowGraph, conditional: IfElse) void {
@@ -327,16 +349,16 @@ pub const ControlFlowGraph = struct {
 
         self.current_block = body_block;
         for (loop_while.body.items) |statement| self.emitStatement(statement);
-        self.blocks.items[self.current_block].then(self.allocator, &self.blocks.items[cond_block]);
+        self.currentBlock().then(self.allocator, self.getBlock(cond_block));
         self.emitBranch(cond_block);
 
         const merge_block = self.appendBlock();
-        self.blocks.items[cond_block].terminator().branch_if.false_block = merge_block;
+        self.getBlock(cond_block).terminator(self.instruction_pool).branch_if.false_block = merge_block;
         self.current_block = merge_block;
 
-        self.blocks.items[start_block].then(self.allocator, &self.blocks.items[cond_block]);
-        self.blocks.items[cond_block].then(self.allocator, &self.blocks.items[body_block]);
-        self.blocks.items[cond_block].then(self.allocator, &self.blocks.items[merge_block]);
+        self.getBlock(start_block).then(self.allocator, self.getBlock(cond_block));
+        self.getBlock(cond_block).then(self.allocator, self.getBlock(body_block));
+        self.getBlock(cond_block).then(self.allocator, self.getBlock(merge_block));
     }
 
     pub fn emitStatement(self: *ControlFlowGraph, statement: Statement) void {
@@ -355,10 +377,14 @@ pub const ControlFlowGraph = struct {
     }
 
     pub fn log(self: *ControlFlowGraph) void {
-        for (self.blocks.items) |block| {
+        for (self.blocks.items) |block_id| {
+            const block = self.getBlock(block_id);
+
             if (block.id > 0) std.debug.print("{s}.{}:\n", .{ self.name, block.id });
 
-            for (block.instructions.items) |instruction| {
+            for (block.instructions.items) |inst_id| {
+                const instruction = self.instruction_pool.items[inst_id];
+
                 std.debug.print("  ", .{});
 
                 switch (instruction) {
@@ -389,6 +415,7 @@ pub const ControlFlowGraph = struct {
                     .cmp_le => |i| std.debug.print("t{} = cmp le t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
                     .branch => |i| std.debug.print("br {s}.{}\n", .{ self.name, i }),
                     .branch_if => |i| std.debug.print("br t{} {s}.{} {s}.{}\n", .{ i.condition.id, self.name, i.true_block, self.name, i.false_block }),
+                    .dead => std.debug.print("(dead)\n", .{}),
                 }
             }
         }
@@ -400,14 +427,18 @@ pub const ControlFlowGraph = struct {
 
         file.writeAll("digraph {\n") catch unreachable;
 
-        for (self.blocks.items) |block| {
+        for (self.blocks.items) |block_id| {
+            const block = self.getBlock(block_id);
+
             const buf = std.fmt.allocPrint(self.allocator, "  {s}_{} [label=\"{s}.{}\"]\n", .{ self.name, block.id, self.name, block.id }) catch unreachable;
             defer self.allocator.free(buf);
 
             file.writeAll(buf) catch unreachable;
         }
 
-        for (self.blocks.items) |block| {
+        for (self.blocks.items) |block_id| {
+            const block = self.getBlock(block_id);
+
             for (block.successors.items) |succ| {
                 const buf = std.fmt.allocPrint(self.allocator, "  {s}_{} -> {s}_{}\n", .{ self.name, block.id, self.name, succ }) catch unreachable;
                 defer self.allocator.free(buf);
