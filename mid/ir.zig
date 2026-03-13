@@ -10,6 +10,7 @@ const VarAssign = parse.VarAssign;
 const IfElse = parse.IfElse;
 const LoopWhile = parse.LoopWhile;
 const FnDeclare = parse.FnDeclare;
+const FnSignature = parse.FnSignature;
 
 pub const Temp = struct {
     id: usize,
@@ -17,7 +18,7 @@ pub const Temp = struct {
 };
 
 pub const Ret = struct { value: Temp };
-pub const Const = struct { dest: Temp, value: f64 }; // todo: add more literal types e.g. bool, str
+pub const Const = struct { dest: Temp, value: i64 }; // todo: add more literal types e.g. bool, str
 pub const Alloca = struct { name: []const u8 };
 pub const Store = struct { dest: []const u8, src: Temp };
 pub const Load = struct { dest: Temp, src: []const u8 };
@@ -83,9 +84,9 @@ pub const BasicBlock = struct {
     }
 };
 
-pub const ControlFlowGraph = struct {
+pub const IRFunction = struct {
     allocator: std.mem.Allocator,
-    name: []const u8,
+    signature: FnSignature,
     block_pool: std.ArrayList(BasicBlock) = .empty,
     blocks: std.ArrayList(usize) = .empty,
     instruction_pool: std.ArrayList(Instruction) = .empty,
@@ -93,11 +94,11 @@ pub const ControlFlowGraph = struct {
     num_temps: usize = 0,
     vars: std.ArrayList([]const u8) = .empty,
 
-    pub fn init(allocator: std.mem.Allocator, name: []const u8) ControlFlowGraph {
-        return ControlFlowGraph{ .allocator = allocator, .name = name };
+    pub fn init(allocator: std.mem.Allocator, signature: FnSignature) IRFunction {
+        return IRFunction{ .allocator = allocator, .signature = signature };
     }
 
-    pub fn deinit(self: *ControlFlowGraph) void {
+    pub fn deinit(self: *IRFunction) void {
         for (self.blocks.items) |block_id| {
             var block = self.getBlock(block_id);
 
@@ -118,26 +119,26 @@ pub const ControlFlowGraph = struct {
         self.blocks.deinit(self.allocator);
     }
 
-    pub fn dbg(self: *ControlFlowGraph) void {
+    pub fn dbg(self: *IRFunction) void {
         for (self.blocks.items) |block_id| self.getBlock(block_id).dbg();
         std.debug.print("\n", .{});
     }
 
-    pub fn newTemp(self: *ControlFlowGraph) Temp {
+    pub fn newTemp(self: *IRFunction) Temp {
         const id = self.num_temps;
         self.num_temps += 1;
         return .{ .id = id };
     }
 
-    pub fn getBlock(self: *ControlFlowGraph, block_id: usize) *BasicBlock {
+    pub fn getBlock(self: *IRFunction, block_id: usize) *BasicBlock {
         return &self.block_pool.items[block_id];
     }
 
-    pub fn currentBlock(self: *ControlFlowGraph) *BasicBlock {
+    pub fn currentBlock(self: *IRFunction) *BasicBlock {
         return self.getBlock(self.current_block);
     }
 
-    pub fn appendBlock(self: *ControlFlowGraph) usize {
+    pub fn appendBlock(self: *IRFunction) usize {
         const id = self.block_pool.items.len;
 
         self.block_pool.append(self.allocator, .{ .id = id }) catch unreachable;
@@ -146,118 +147,118 @@ pub const ControlFlowGraph = struct {
         return id;
     }
 
-    pub fn appendInstruction(self: *ControlFlowGraph, instruction: Instruction) void {
+    pub fn appendInstruction(self: *IRFunction, instruction: Instruction) void {
         self.currentBlock().instructions.append(self.allocator, self.instruction_pool.items.len) catch unreachable;
         self.instruction_pool.append(self.allocator, instruction) catch unreachable;
     }
 
-    pub fn emitConst(self: *ControlFlowGraph, dest: Temp, value: f64) Temp {
+    pub fn emitConst(self: *IRFunction, dest: Temp, value: i64) Temp {
         self.appendInstruction(.{ .@"const" = .{ .dest = dest, .value = value } });
         return dest;
     }
 
-    pub fn emitAlloca(self: *ControlFlowGraph, name: []const u8) void {
+    pub fn emitAlloca(self: *IRFunction, name: []const u8) void {
         self.appendInstruction(.{ .alloca = .{ .name = name } });
         self.vars.append(self.allocator, name) catch unreachable;
     }
 
-    pub fn emitStore(self: *ControlFlowGraph, dest: []const u8, src: Temp) Temp {
+    pub fn emitStore(self: *IRFunction, dest: []const u8, src: Temp) Temp {
         self.appendInstruction(.{ .store = .{ .dest = dest, .src = src } });
         return src;
     }
 
-    pub fn emitLoad(self: *ControlFlowGraph, dest: Temp, src: []const u8) Temp {
+    pub fn emitLoad(self: *IRFunction, dest: Temp, src: []const u8) Temp {
         self.appendInstruction(.{ .load = .{ .dest = dest, .src = src } });
         return dest;
     }
 
-    pub fn emitCall(self: *ControlFlowGraph, dest: Temp, name: []const u8, args: std.ArrayList(Temp)) Temp {
+    pub fn emitCall(self: *IRFunction, dest: Temp, name: []const u8, args: std.ArrayList(Temp)) Temp {
         self.appendInstruction(.{ .call = .{ .dest = dest, .name = name, .args = args } });
         return dest;
     }
 
-    pub fn emitAdd(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
+    pub fn emitAdd(self: *IRFunction, dest: Temp, left: Temp, right: Temp) Temp {
         self.appendInstruction(.{ .add = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
-    pub fn emitSub(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
+    pub fn emitSub(self: *IRFunction, dest: Temp, left: Temp, right: Temp) Temp {
         self.appendInstruction(.{ .sub = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
-    pub fn emitMul(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
+    pub fn emitMul(self: *IRFunction, dest: Temp, left: Temp, right: Temp) Temp {
         self.appendInstruction(.{ .mul = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
-    pub fn emitDiv(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
+    pub fn emitDiv(self: *IRFunction, dest: Temp, left: Temp, right: Temp) Temp {
         self.appendInstruction(.{ .div = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
-    pub fn emitCmpEq(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
+    pub fn emitCmpEq(self: *IRFunction, dest: Temp, left: Temp, right: Temp) Temp {
         self.appendInstruction(.{ .cmp_eq = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
-    pub fn emitCmpNe(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
+    pub fn emitCmpNe(self: *IRFunction, dest: Temp, left: Temp, right: Temp) Temp {
         self.appendInstruction(.{ .cmp_ne = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
-    pub fn emitCmpGt(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
+    pub fn emitCmpGt(self: *IRFunction, dest: Temp, left: Temp, right: Temp) Temp {
         self.appendInstruction(.{ .cmp_gt = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
-    pub fn emitCmpLt(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
+    pub fn emitCmpLt(self: *IRFunction, dest: Temp, left: Temp, right: Temp) Temp {
         self.appendInstruction(.{ .cmp_lt = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
-    pub fn emitCmpGe(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
+    pub fn emitCmpGe(self: *IRFunction, dest: Temp, left: Temp, right: Temp) Temp {
         self.appendInstruction(.{ .cmp_ge = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
-    pub fn emitCmpLe(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
+    pub fn emitCmpLe(self: *IRFunction, dest: Temp, left: Temp, right: Temp) Temp {
         self.appendInstruction(.{ .cmp_le = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
-    pub fn emitAndAnd(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
+    pub fn emitAndAnd(self: *IRFunction, dest: Temp, left: Temp, right: Temp) Temp {
         self.appendInstruction(.{ .andand = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
-    pub fn emitOrOr(self: *ControlFlowGraph, dest: Temp, left: Temp, right: Temp) Temp {
+    pub fn emitOrOr(self: *IRFunction, dest: Temp, left: Temp, right: Temp) Temp {
         self.appendInstruction(.{ .oror = .{ .dest = dest, .left = left, .right = right } });
         return dest;
     }
 
-    pub fn emitBranch(self: *ControlFlowGraph, block_id: usize) void {
+    pub fn emitBranch(self: *IRFunction, block_id: usize) void {
         self.appendInstruction(.{ .branch = block_id });
     }
 
-    pub fn emitBranchIf(self: *ControlFlowGraph, condition: Temp, true_block_id: usize, false_block_id: usize) void {
+    pub fn emitBranchIf(self: *IRFunction, condition: Temp, true_block_id: usize, false_block_id: usize) void {
         self.appendInstruction(.{ .branch_if = .{ .condition = condition, .true_block = true_block_id, .false_block = false_block_id } });
     }
 
-    pub fn emitReturn(self: *ControlFlowGraph, expression: *Expression) void {
+    pub fn emitReturn(self: *IRFunction, expression: *Expression) void {
         self.appendInstruction(.{ .ret = .{ .value = self.emitExpression(expression) } });
     }
 
-    pub fn emitVarDeclare(self: *ControlFlowGraph, var_declare: VarDeclare) void {
+    pub fn emitVarDeclare(self: *IRFunction, var_declare: VarDeclare) void {
         self.emitAlloca(var_declare.name);
         _ = self.emitStore(var_declare.name, self.emitExpression(var_declare.value));
     }
 
-    pub fn emitVarAssign(self: *ControlFlowGraph, var_assign: VarAssign) void {
+    pub fn emitVarAssign(self: *IRFunction, var_assign: VarAssign) void {
         _ = self.emitStore(var_assign.name, self.emitExpression(var_assign.value));
     }
 
-    pub fn emitExpression(self: *ControlFlowGraph, expression: *Expression) Temp {
+    pub fn emitExpression(self: *IRFunction, expression: *Expression) Temp {
         switch (expression.*) {
             .number_literal => |n| return self.emitConst(self.newTemp(), n),
             .identifier => |i| return self.emitLoad(self.newTemp(), i),
@@ -288,7 +289,7 @@ pub const ControlFlowGraph = struct {
         }
     }
 
-    pub fn emitIf(self: *ControlFlowGraph, if_else: IfElse) void {
+    pub fn emitIf(self: *IRFunction, if_else: IfElse) void {
         const start_block = self.current_block;
 
         const if_block = self.appendBlock();
@@ -308,7 +309,7 @@ pub const ControlFlowGraph = struct {
         self.getBlock(start_block).then(self.allocator, self.getBlock(merge_block));
     }
 
-    pub fn emitIfElse(self: *ControlFlowGraph, if_else: IfElse) void {
+    pub fn emitIfElse(self: *IRFunction, if_else: IfElse) void {
         const start_block = self.current_block;
 
         const if_block = self.appendBlock();
@@ -337,12 +338,12 @@ pub const ControlFlowGraph = struct {
         self.getBlock(start_block).then(self.allocator, self.getBlock(else_block));
     }
 
-    pub fn emitConditional(self: *ControlFlowGraph, conditional: IfElse) void {
+    pub fn emitConditional(self: *IRFunction, conditional: IfElse) void {
         if (conditional.else_block.items.len == 0) return self.emitIf(conditional);
         self.emitIfElse(conditional);
     }
 
-    pub fn emitWhile(self: *ControlFlowGraph, loop_while: LoopWhile) void {
+    pub fn emitWhile(self: *IRFunction, loop_while: LoopWhile) void {
         const start_block = self.current_block;
 
         const cond_block = self.appendBlock();
@@ -367,7 +368,7 @@ pub const ControlFlowGraph = struct {
         self.getBlock(cond_block).then(self.allocator, self.getBlock(merge_block));
     }
 
-    pub fn emitStatement(self: *ControlFlowGraph, statement: Statement) void {
+    pub fn emitStatement(self: *IRFunction, statement: Statement) void {
         switch (statement) {
             .@"return" => |s| self.emitReturn(s),
             .expression => |s| _ = self.emitExpression(s),
@@ -378,16 +379,16 @@ pub const ControlFlowGraph = struct {
         }
     }
 
-    pub fn emit(self: *ControlFlowGraph, statements: []Statement) void {
+    pub fn emit(self: *IRFunction, statements: []Statement) void {
         _ = self.appendBlock();
         for (statements) |statement| self.emitStatement(statement);
     }
 
-    pub fn log(self: *ControlFlowGraph) void {
+    pub fn log(self: *IRFunction) void {
         for (self.blocks.items) |block_id| {
             const block = self.getBlock(block_id);
 
-            if (block.id > 0) std.debug.print("{s}.{}:\n", .{ self.name, block.id });
+            if (block.id > 0) std.debug.print("{s}.{}:\n", .{ self.signature.name, block.id });
 
             for (block.instructions.items) |inst_id| {
                 const instruction = self.instruction_pool.items[inst_id];
@@ -421,15 +422,15 @@ pub const ControlFlowGraph = struct {
                     .cmp_lt => |i| std.debug.print("t{} = cmp lt t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
                     .cmp_ge => |i| std.debug.print("t{} = cmp ge t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
                     .cmp_le => |i| std.debug.print("t{} = cmp le t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
-                    .branch => |i| std.debug.print("br {s}.{}\n", .{ self.name, i }),
-                    .branch_if => |i| std.debug.print("br t{} {s}.{} {s}.{}\n", .{ i.condition.id, self.name, i.true_block, self.name, i.false_block }),
+                    .branch => |i| std.debug.print("br {s}.{}\n", .{ self.signature.name, i }),
+                    .branch_if => |i| std.debug.print("br t{} {s}.{} {s}.{}\n", .{ i.condition.id, self.signature.name, i.true_block, self.signature.name, i.false_block }),
                     .dead => std.debug.print("(dead)\n", .{}),
                 }
             }
         }
     }
 
-    pub fn dot(self: *ControlFlowGraph, path: []const u8) void {
+    pub fn dot(self: *IRFunction, path: []const u8) void {
         var file = std.fs.cwd().createFile(path, .{}) catch unreachable;
         defer file.close();
 
@@ -438,7 +439,7 @@ pub const ControlFlowGraph = struct {
         for (self.blocks.items) |block_id| {
             const block = self.getBlock(block_id);
 
-            const buf = std.fmt.allocPrint(self.allocator, "  {s}_{} [label=\"{s}.{}\"]\n", .{ self.name, block.id, self.name, block.id }) catch unreachable;
+            const buf = std.fmt.allocPrint(self.allocator, "  {s}_{} [label=\"{s}.{}\"]\n", .{ self.signature.name, block.id, self.signature.name, block.id }) catch unreachable;
             defer self.allocator.free(buf);
 
             file.writeAll(buf) catch unreachable;
@@ -448,7 +449,7 @@ pub const ControlFlowGraph = struct {
             const block = self.getBlock(block_id);
 
             for (block.successors.items) |succ| {
-                const buf = std.fmt.allocPrint(self.allocator, "  {s}_{} -> {s}_{}\n", .{ self.name, block.id, self.name, succ }) catch unreachable;
+                const buf = std.fmt.allocPrint(self.allocator, "  {s}_{} -> {s}_{}\n", .{ self.signature.name, block.id, self.signature.name, succ }) catch unreachable;
                 defer self.allocator.free(buf);
 
                 file.writeAll(buf) catch unreachable;
@@ -461,10 +462,10 @@ pub const ControlFlowGraph = struct {
 
 pub const IRModule = struct {
     allocator: std.mem.Allocator,
-    functions: std.ArrayList(ControlFlowGraph) = .empty,
+    functions: std.ArrayList(IRFunction) = .empty,
 
     pub fn init(allocator: std.mem.Allocator) IRModule {
-        return IRModule{ .allocator = allocator };
+        return .{ .allocator = allocator };
     }
 
     pub fn deinit(self: *IRModule) void {
@@ -474,7 +475,7 @@ pub const IRModule = struct {
 
     pub fn emit(self: *IRModule, functions: []FnDeclare) void {
         for (functions) |func| {
-            var function = ControlFlowGraph.init(self.allocator, func.signature.name);
+            var function = IRFunction.init(self.allocator, func.signature);
             function.emit(func.body.items);
             self.functions.append(self.allocator, function) catch unreachable;
         }
@@ -482,7 +483,7 @@ pub const IRModule = struct {
 
     pub fn log(self: *IRModule) void {
         for (self.functions.items) |*func| {
-            std.debug.print("\n{s}:\n", .{func.name});
+            std.debug.print("\n{s}:\n", .{func.signature.name});
             func.log();
         }
     }

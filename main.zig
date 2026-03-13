@@ -5,7 +5,7 @@ const Parser = @import("./front/parse.zig").Parser;
 const SemanticAnalyzer = @import("./front/semantic.zig").SemanticAnalyzer;
 const IREmitter = @import("./mid/ir.zig").IRModule;
 const DomTree = @import("./mid/analyze/domtree.zig").DomTree;
-const mem2reg = @import("./mid/transform/mem2reg.zig").mem2reg;
+const mem2reg = @import("./mid/transform/ssa.zig").mem2reg;
 const LLIRModule = @import("./back/x86_64/x86_64.zig").LLIRModule;
 
 pub fn main() !void {
@@ -63,7 +63,7 @@ pub fn main() !void {
     ir_module.log();
     for (ir_module.functions.items) |*func| {
         func.dbg();
-        func.dot(func.name);
+        func.dot(func.signature.name);
     }
 
     // var domtree = DomTree.init(allocator, &ir_module.functions.items[0]);
@@ -82,4 +82,8 @@ pub fn main() !void {
     //         std.debug.print("\n", .{});
     //     }
     // }
+
+    var llir_module = LLIRModule.init(&ir_module);
+    llir_module.lower();
+    llir_module.log();
 }

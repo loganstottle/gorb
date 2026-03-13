@@ -57,7 +57,7 @@ pub const BinaryOperator = enum {
 };
 
 pub const Expression = union(enum) {
-    number_literal: f64,
+    number_literal: i64,
     identifier: []const u8,
     fn_call: struct {
         name: []const u8,
@@ -278,7 +278,7 @@ pub const Parser = struct {
             },
             .LiteralNumber => {
                 const result = self.allocator.create(Expression) catch unreachable;
-                result.* = .{ .number_literal = std.fmt.parseFloat(f64, self.consume().value) catch unreachable };
+                result.* = .{ .number_literal = std.fmt.parseInt(i64, self.consume().value, 10) catch unreachable };
 
                 return result;
             },

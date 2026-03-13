@@ -1,24 +1,24 @@
 const std = @import("std");
 
-const ControlFlowGraph = @import("../mid/ir.zig").ControlFlowGraph;
+const IRFunction = @import("../mid/ir.zig").IRFunction;
 
-pub fn number_postorder(cfg: *ControlFlowGraph, allocator: std.mem.Allocator, numbering: *std.ArrayList(usize), inverse_numbering: ?*std.ArrayList(usize)) void {
-    var visited: std.ArrayList(bool) = .empty;
-    visited.appendNTimes(allocator, false, cfg.blocks.items.len) catch unreachable;
-    var cur: usize = 0;
+pub fn number_postorder(cfg: *IRFunction, dfs: *std.ArrayList(usize), inv_dfs: ?*std.AutoHashMap(usize, usize)) void {
+    var visited = std.AutoHashMap(usize, bool).init(cfg.allocator);
+    defer visited.deinit();
 
-    _number_postorder(cfg, 0, &visited, numbering, inverse_numbering, &cur);
+    var cur_idx: usize = 0;
+    _number_postorder(cfg, dfs, inv_dfs, &visited, &cur_idx, cfg.blocks.items[0]);
 }
 
-fn _number_postorder(cfg: *ControlFlowGraph, bb: usize, visited: *std.ArrayList(bool), numbering: *std.ArrayList(usize), inverse_numbering: ?*std.ArrayList(usize), cur: *usize) void {
-    if (visited.items[bb]) return;
-    visited.items[bb] = true;
+pub fn _number_postorder(cfg: *IRFunction, dfs: *std.ArrayList(usize), inv_dfs: ?*std.AutoHashMap(usize, usize), visited: *std.AutoHashMap(usize, bool), cur_idx: *usize, block_id: usize) void {
+    if (visited.get(block_id) != null) return;
+    visited.put(block_id, true) catch unreachable;
 
-    for (cfg.blocks.items[bb].successors.items) |succ|
-        _number_postorder(cfg, succ, visited, numbering, inverse_numbering, cur);
+    for (cfg.getBlock(block_id).successors.items) |succ_id|
+        _number_postorder(cfg, dfs, inv_dfs, visited, cur_idx, succ_id);
 
-    numbering.items[bb] = cur.*;
-    if (inverse_numbering) |inv| inv.items[cur.*] = bb;
+    dfs.items[cur_idx.*] = block_id;
+    if (inv_dfs) |inv| inv.put(block_id, cur_idx.*) catch unreachable;
 
-    cur.* += 1;
+    cur_idx.* += 1;
 }
