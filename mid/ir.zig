@@ -16,6 +16,7 @@ pub const Temp = struct {
     //type: Type,
 };
 
+pub const Ret = struct { value: Temp };
 pub const Const = struct { dest: Temp, value: f64 }; // todo: add more literal types e.g. bool, str
 pub const Alloca = struct { name: []const u8 };
 pub const Store = struct { dest: []const u8, src: Temp };
@@ -25,6 +26,7 @@ pub const BinaryOp = struct { dest: Temp, left: Temp, right: Temp };
 pub const BranchIf = struct { condition: Temp, true_block: usize, false_block: usize };
 
 pub const Instruction = union(enum) {
+    ret: Ret,
     @"const": Const,
     alloca: Alloca,
     store: Store,
@@ -242,6 +244,10 @@ pub const ControlFlowGraph = struct {
         self.appendInstruction(.{ .branch_if = .{ .condition = condition, .true_block = true_block_id, .false_block = false_block_id } });
     }
 
+    pub fn emitReturn(self: *ControlFlowGraph, expression: *Expression) void {
+        self.appendInstruction(.{ .ret = .{ .value = self.emitExpression(expression) } });
+    }
+
     pub fn emitVarDeclare(self: *ControlFlowGraph, var_declare: VarDeclare) void {
         self.emitAlloca(var_declare.name);
         _ = self.emitStore(var_declare.name, self.emitExpression(var_declare.value));
@@ -363,6 +369,7 @@ pub const ControlFlowGraph = struct {
 
     pub fn emitStatement(self: *ControlFlowGraph, statement: Statement) void {
         switch (statement) {
+            .@"return" => |s| self.emitReturn(s),
             .expression => |s| _ = self.emitExpression(s),
             .var_declare => |s| self.emitVarDeclare(s),
             .var_assign => |s| self.emitVarAssign(s),
@@ -388,6 +395,7 @@ pub const ControlFlowGraph = struct {
                 std.debug.print("  ", .{});
 
                 switch (instruction) {
+                    .ret => |i| std.debug.print("ret t{}\n", .{i.value.id}),
                     .@"const" => |i| std.debug.print("t{} = const {}\n", .{ i.dest.id, i.value }),
                     .alloca => |i| std.debug.print("{s} = alloca\n", .{i.name}),
                     .store => |i| std.debug.print("store t{} -> {s}\n", .{ i.src.id, i.dest }),

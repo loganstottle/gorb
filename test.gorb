@@ -1,8 +1,7 @@
+fn i32 test(i32 a, i32 b) {
+  return a + b;
+}
+
 fn void main() {
-  mut u64 x = 0;
-
-  if x == 0  x = 1;
-  else       x = 2;
-
-  x = 3;
+  mut i32 x = test(1, 2);
 }

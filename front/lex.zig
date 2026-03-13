@@ -45,6 +45,7 @@ pub const TokenKind = enum {
     KeywordElse,
     KeywordWhile,
     KeywordFn,
+    KeywordReturn,
 };
 
 pub const Token = struct {
@@ -189,6 +190,7 @@ pub const Lexer = struct {
         if (std.mem.eql(u8, name, "else")) return .KeywordElse;
         if (std.mem.eql(u8, name, "while")) return .KeywordWhile;
         if (std.mem.eql(u8, name, "fn")) return .KeywordFn;
+        if (std.mem.eql(u8, name, "return")) return .KeywordReturn;
 
         return null;
     }

@@ -101,6 +101,11 @@ pub const SemanticAnalyzer = struct {
         _ = fn_declare;
     }
 
+    pub fn analyzeReturn(self: *SemanticAnalyzer, expression: *Expression) void {
+        _ = self;
+        _ = expression;
+    }
+
     pub fn analyze(self: *SemanticAnalyzer) void {
         for (self.functions.items) |f| {
             self.enterScope();
@@ -112,6 +117,7 @@ pub const SemanticAnalyzer = struct {
                     .var_assign => |st| self.analyzeVarAssign(st),
                     .if_else => |st| self.analyzeIfElse(st),
                     .loop_while => |st| self.analyzeWhile(st),
+                    .@"return" => |st| self.analyzeReturn(st),
                 }
             }
 

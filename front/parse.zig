@@ -133,9 +133,11 @@ pub const Statement = union(enum) {
     var_assign: VarAssign,
     if_else: IfElse,
     loop_while: LoopWhile,
+    @"return": *Expression,
 
     pub fn deinit(self: Statement, allocator: std.mem.Allocator) void {
         switch (self) {
+            .@"return" => |s| s.deinit(allocator),
             .expression => |s| s.deinit(allocator),
             .var_declare => |s| s.value.deinit(allocator),
             .var_assign => |s| s.value.deinit(allocator),
@@ -332,7 +334,11 @@ pub const Parser = struct {
     pub fn parseFnDeclare(self: *Parser) FnDeclare {
         _ = self.expect(.KeywordFn);
 
-        const return_type = self.parseType().?;
+        const return_type = self.parseType();
+        if (return_type == null) {
+            std.debug.print("expected return value type, got: {any}\n", .{return_type});
+            std.process.exit(0); // TODO better errors
+        }
 
         const name = self.expect(.Identifier).value;
         var parameters: std.ArrayList(Parameter) = .empty;
@@ -340,13 +346,19 @@ pub const Parser = struct {
         _ = self.expect(.SymbolOpenParen);
 
         while (self.peek().kind != .SymbolCloseParen) {
-            parameters.append(self.allocator, .{ .type = self.parseType().?, .name = self.expect(.Identifier).value }) catch unreachable;
+            const param_type = self.parseType();
+            if (param_type == null) {
+                std.debug.print("expected parameter type, got: {s}\n", .{self.peek().value});
+                std.process.exit(0); // TODO better errors
+            }
+
+            parameters.append(self.allocator, .{ .type = param_type.?, .name = self.expect(.Identifier).value }) catch unreachable;
             if (self.peek().kind != .SymbolCloseParen) _ = self.expect(.SymbolComma);
         }
 
         _ = self.expect(.SymbolCloseParen);
 
-        return .{ .signature = .{ .name = name, .return_type = return_type, .parameters = parameters }, .body = self.parseBlock() };
+        return .{ .signature = .{ .name = name, .return_type = return_type.?, .parameters = parameters }, .body = self.parseBlock() };
     }
 
     pub fn parseExpressionPrec(self: *Parser, min_prec: u32) *Expression {
@@ -414,10 +426,19 @@ pub const Parser = struct {
         return expr;
     }
 
+    pub fn parseReturn(self: *Parser) Statement {
+        _ = self.expect(.KeywordReturn);
+        const value = self.parseExpression();
+        _ = self.expect(.SymbolSemiColon);
+
+        return .{ .@"return" = value };
+    }
+
     pub fn parseStatement(self: *Parser) Statement {
         var statement: ?Statement = null;
 
         switch (self.peek().kind) {
+            .KeywordReturn => return self.parseReturn(),
             .KeywordIf => return self.parseIfElse(),
             .KeywordWhile => return self.parseWhile(),
             .Identifier => {
