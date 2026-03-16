@@ -4,7 +4,7 @@ const lex = @import("lex.zig");
 const Token = lex.Token;
 const TokenKind = lex.TokenKind;
 
-pub const TypeKind = union(enum) {
+pub const Type = union(enum) {
     U8,
     U16,
     U32,
@@ -16,14 +16,19 @@ pub const TypeKind = union(enum) {
     F32,
     F64,
     Boolean,
-    Pointer: *TypeKind,
-    Auto,
+    Pointer: *Type,
     Void,
-};
+    Unknown,
 
-pub const Type = struct {
-    kind: TypeKind,
-    mutable: bool,
+    pub fn same(self: *Type, other: *Type) bool {
+        return switch (self.*) {
+            .Pointer => |t1| switch (other.*) {
+                .Pointer => |t2| t1.same(t2),
+                else => false,
+            },
+            else => std.meta.activeTag(self.*) == std.meta.activeTag(other.*),
+        };
+    }
 };
 
 pub const BinaryOperator = enum {
@@ -56,7 +61,7 @@ pub const BinaryOperator = enum {
     }
 };
 
-pub const Expression = union(enum) {
+pub const ExpressionKind = union(enum) {
     number_literal: i64,
     identifier: []const u8,
     fn_call: struct {
@@ -68,10 +73,15 @@ pub const Expression = union(enum) {
         left: *Expression,
         right: *Expression,
     },
+};
+
+pub const Expression = struct {
+    ty: Type,
+    kind: ExpressionKind,
 
     pub fn deinit(self: *Expression, allocator: std.mem.Allocator) void {
-        switch (self.*) {
-            .binary => |e| {
+        switch (self.kind) {
+            .binary => |*e| {
                 e.left.deinit(allocator);
                 e.right.deinit(allocator);
             },
@@ -92,7 +102,10 @@ pub const VarDeclare = struct {
     value: *Expression,
 };
 
-pub const VarAssign = struct { name: []const u8, value: *Expression };
+pub const VarAssign = struct {
+    name: []const u8,
+    value: *Expression,
+};
 
 pub const Parameter = struct {
     type: Type,
@@ -231,10 +244,7 @@ pub const Parser = struct {
     }
 
     pub fn parseType(self: *Parser) ?Type {
-        const mutable = self.peek().kind == .KeywordMut;
-        if (mutable) _ = self.consume();
-
-        const kind: TypeKind = switch (self.peek().kind) {
+        var t: Type = switch (self.peek().kind) {
             .KeywordU8 => .U8,
             .KeywordU16 => .U16,
             .KeywordU32 => .U32,
@@ -251,15 +261,13 @@ pub const Parser = struct {
 
         _ = self.consume();
 
-        var t: Type = .{ .kind = kind, .mutable = mutable };
-
         while (self.peek().kind == .OperatorStar) {
             _ = self.consume();
 
-            const k = self.allocator.create(TypeKind) catch unreachable;
-            k.* = kind;
+            const pt = self.allocator.create(Type) catch unreachable;
+            pt.* = t;
 
-            t = .{ .kind = .{ .Pointer = k }, .mutable = mutable };
+            t = .{ .Pointer = pt };
         }
 
         return t;
@@ -272,13 +280,13 @@ pub const Parser = struct {
                     return self.parseFnCall();
 
                 const result = self.allocator.create(Expression) catch unreachable;
-                result.* = .{ .identifier = self.consume().value };
+                result.* = .{ .ty = .Unknown, .kind = .{ .identifier = self.consume().value } };
 
                 return result;
             },
             .LiteralNumber => {
                 const result = self.allocator.create(Expression) catch unreachable;
-                result.* = .{ .number_literal = std.fmt.parseInt(i64, self.consume().value, 10) catch unreachable };
+                result.* = .{ .ty = .I32, .kind = .{ .number_literal = std.fmt.parseInt(i32, self.consume().value, 10) catch unreachable } };
 
                 return result;
             },
@@ -376,7 +384,7 @@ pub const Parser = struct {
             _ = self.consume();
 
             const next_lhs = self.allocator.create(Expression) catch unreachable;
-            next_lhs.* = .{ .binary = .{ .operator = op, .left = lhs, .right = self.parseExpressionPrec(next_min_prec) } };
+            next_lhs.* = .{ .ty = .Unknown, .kind = .{ .binary = .{ .operator = op, .left = lhs, .right = self.parseExpressionPrec(next_min_prec) } } };
 
             lhs = next_lhs;
         }
@@ -414,10 +422,10 @@ pub const Parser = struct {
         _ = self.expect(.SymbolOpenParen);
 
         const expr = self.allocator.create(Expression) catch unreachable;
-        expr.* = .{ .fn_call = .{ .name = name } };
+        expr.* = .{ .ty = .Unknown, .kind = .{ .fn_call = .{ .name = name } } };
 
         while (self.peek().kind != .SymbolCloseParen) {
-            expr.*.fn_call.args.append(self.allocator, self.parseExpression()) catch unreachable;
+            expr.kind.fn_call.args.append(self.allocator, self.parseExpression()) catch unreachable;
             if (self.peek().kind != .SymbolCloseParen) _ = self.expect(.SymbolComma);
         }
 
@@ -428,26 +436,22 @@ pub const Parser = struct {
 
     pub fn parseReturn(self: *Parser) Statement {
         _ = self.expect(.KeywordReturn);
-        const value = self.parseExpression();
-        _ = self.expect(.SymbolSemiColon);
-
-        return .{ .@"return" = value };
+        return .{ .@"return" = self.parseExpression() };
     }
 
     pub fn parseStatement(self: *Parser) Statement {
         var statement: ?Statement = null;
 
         switch (self.peek().kind) {
-            .KeywordReturn => return self.parseReturn(),
             .KeywordIf => return self.parseIfElse(),
             .KeywordWhile => return self.parseWhile(),
             .Identifier => {
                 if (self.okAhead(1) and self.peekAhead(1).kind == .SymbolEqual)
                     statement = self.parseVarAssign();
             },
+            .KeywordReturn => statement = self.parseReturn(),
             else => {
-                if (self.parseType()) |t|
-                    statement = self.parseVarDeclare(t);
+                if (self.parseType()) |t| statement = self.parseVarDeclare(t);
             },
         }
 

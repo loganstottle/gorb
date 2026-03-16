@@ -53,6 +53,11 @@ pub fn main() !void {
 
     std.debug.print("\nSemantics:\n", .{});
     semantic_analyzer.analyze();
+    for (semantic_analyzer.errors.items) |e|
+        std.debug.print("error: {s}", .{e});
+
+    if (semantic_analyzer.errors.items.len > 0)
+        return;
 
     var ir_module = IREmitter.init(allocator);
     defer ir_module.deinit();

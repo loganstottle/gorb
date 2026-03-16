@@ -259,7 +259,7 @@ pub const IRFunction = struct {
     }
 
     pub fn emitExpression(self: *IRFunction, expression: *Expression) Temp {
-        switch (expression.*) {
+        switch (expression.kind) {
             .number_literal => |n| return self.emitConst(self.newTemp(), n),
             .identifier => |i| return self.emitLoad(self.newTemp(), i),
             .fn_call => |f| {
