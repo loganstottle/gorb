@@ -20,6 +20,28 @@ pub const Type = union(enum) {
     Void,
     Unknown,
 
+    pub fn log(self: *Type) void {
+        switch (self.*) {
+            .U8 => std.debug.print("u8", .{}),
+            .U16 => std.debug.print("u16", .{}),
+            .U32 => std.debug.print("u32", .{}),
+            .U64 => std.debug.print("u64", .{}),
+            .I8 => std.debug.print("i8", .{}),
+            .I16 => std.debug.print("i16", .{}),
+            .I32 => std.debug.print("i32", .{}),
+            .I64 => std.debug.print("i64", .{}),
+            .F32 => std.debug.print("f32", .{}),
+            .F64 => std.debug.print("f64", .{}),
+            .Boolean => std.debug.print("bool", .{}),
+            .Pointer => |p| {
+                p.log();
+                std.debug.print("*", .{});
+            },
+            .Void => std.debug.print("void", .{}),
+            .Unknown => std.debug.print("?", .{}),
+        }
+    }
+
     pub fn same(self: *Type, other: *Type) bool {
         return switch (self.*) {
             .Pointer => |t1| switch (other.*) {

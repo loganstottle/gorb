@@ -1,7 +1,8 @@
-fn i32 add(i32 a, i32 b) {
-  return a + b;
-}
-
 fn void main() {
-  i32 x = add(1, 2);
+  i32 x = 0;
+
+  if x == 0  x = 1;
+  else       x = 2;
+
+  x = 3;
 }

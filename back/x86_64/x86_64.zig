@@ -292,8 +292,8 @@ pub const LLIRFunction = struct {
         self.appendInstruction(.{ .TESTrr = .{ .dest = dest, .src = src } });
     }
 
-    pub fn lowerRet(self: *LLIRFunction, ret: IR.Ret) void {
-        self.emitMOVrr(RetReg, .{ .virtual = ret.value.id });
+    pub fn lowerRet(self: *LLIRFunction, ret: IR.Temp) void {
+        self.emitMOVrr(RetReg, .{ .virtual = ret.id });
     }
 
     pub fn lowerConst(self: *LLIRFunction, constt: IR.Const) void {

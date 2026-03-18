@@ -14,12 +14,11 @@ const FnSignature = parse.FnSignature;
 
 pub const Temp = struct {
     id: usize,
-    //type: Type,
+    ty: Type,
 };
 
-pub const Ret = struct { value: Temp };
 pub const Const = struct { dest: Temp, value: i64 }; // todo: add more literal types e.g. bool, str
-pub const Alloca = struct { name: []const u8 };
+pub const Alloca = struct { name: []const u8, ty: Type };
 pub const Store = struct { dest: []const u8, src: Temp };
 pub const Load = struct { dest: Temp, src: []const u8 };
 pub const Call = struct { dest: Temp, name: []const u8, args: std.ArrayList(Temp) = .empty }; // todo: function signature
@@ -27,7 +26,7 @@ pub const BinaryOp = struct { dest: Temp, left: Temp, right: Temp };
 pub const BranchIf = struct { condition: Temp, true_block: usize, false_block: usize };
 
 pub const Instruction = union(enum) {
-    ret: Ret,
+    ret: Temp,
     @"const": Const,
     alloca: Alloca,
     store: Store,
@@ -124,10 +123,10 @@ pub const IRFunction = struct {
         std.debug.print("\n", .{});
     }
 
-    pub fn newTemp(self: *IRFunction) Temp {
+    pub fn newTemp(self: *IRFunction, ty: Type) Temp {
         const id = self.num_temps;
         self.num_temps += 1;
-        return .{ .id = id };
+        return .{ .id = id, .ty = ty };
     }
 
     pub fn getBlock(self: *IRFunction, block_id: usize) *BasicBlock {
@@ -157,8 +156,8 @@ pub const IRFunction = struct {
         return dest;
     }
 
-    pub fn emitAlloca(self: *IRFunction, name: []const u8) void {
-        self.appendInstruction(.{ .alloca = .{ .name = name } });
+    pub fn emitAlloca(self: *IRFunction, name: []const u8, ty: Type) void {
+        self.appendInstruction(.{ .alloca = .{ .name = name, .ty = ty } });
         self.vars.append(self.allocator, name) catch unreachable;
     }
 
@@ -246,11 +245,11 @@ pub const IRFunction = struct {
     }
 
     pub fn emitReturn(self: *IRFunction, expression: *Expression) void {
-        self.appendInstruction(.{ .ret = .{ .value = self.emitExpression(expression) } });
+        self.appendInstruction(.{ .ret = self.emitExpression(expression) });
     }
 
     pub fn emitVarDeclare(self: *IRFunction, var_declare: VarDeclare) void {
-        self.emitAlloca(var_declare.name);
+        self.emitAlloca(var_declare.name, var_declare.type);
         _ = self.emitStore(var_declare.name, self.emitExpression(var_declare.value));
     }
 
@@ -260,31 +259,33 @@ pub const IRFunction = struct {
 
     pub fn emitExpression(self: *IRFunction, expression: *Expression) Temp {
         switch (expression.kind) {
-            .number_literal => |n| return self.emitConst(self.newTemp(), n),
-            .identifier => |i| return self.emitLoad(self.newTemp(), i),
+            .number_literal => |n| return self.emitConst(self.newTemp(expression.ty), n),
+            .identifier => |i| return self.emitLoad(self.newTemp(expression.ty), i),
             .fn_call => |f| {
                 var tmps: std.ArrayList(Temp) = .empty;
                 for (f.args.items) |e| tmps.append(self.allocator, self.emitExpression(e)) catch unreachable;
-                return self.emitCall(self.newTemp(), f.name, tmps);
+                return self.emitCall(self.newTemp(expression.ty), f.name, tmps);
             },
             .binary => |b| {
                 const left = self.emitExpression(b.left);
                 const right = self.emitExpression(b.right);
 
-                switch (b.operator) {
-                    .Add => return self.emitAdd(self.newTemp(), left, right),
-                    .Subtract => return self.emitSub(self.newTemp(), left, right),
-                    .Multiply => return self.emitMul(self.newTemp(), left, right),
-                    .Divide => return self.emitDiv(self.newTemp(), left, right),
-                    .Equal => return self.emitCmpEq(self.newTemp(), left, right),
-                    .NotEqual => return self.emitCmpNe(self.newTemp(), left, right),
-                    .Greater => return self.emitCmpGt(self.newTemp(), left, right),
-                    .Less => return self.emitCmpLt(self.newTemp(), left, right),
-                    .GreaterEqual => return self.emitCmpGe(self.newTemp(), left, right),
-                    .LessEqual => return self.emitCmpLe(self.newTemp(), left, right),
-                    .OrOr => return self.emitOrOr(self.newTemp(), left, right),
-                    .AndAnd => return self.emitAndAnd(self.newTemp(), left, right),
-                }
+                const dest = self.newTemp(expression.ty);
+
+                return switch (b.operator) {
+                    .Add => self.emitAdd(dest, left, right),
+                    .Subtract => self.emitSub(dest, left, right),
+                    .Multiply => self.emitMul(dest, left, right),
+                    .Divide => self.emitDiv(dest, left, right),
+                    .Equal => self.emitCmpEq(dest, left, right),
+                    .NotEqual => self.emitCmpNe(dest, left, right),
+                    .Greater => self.emitCmpGt(dest, left, right),
+                    .Less => self.emitCmpLt(dest, left, right),
+                    .GreaterEqual => self.emitCmpGe(dest, left, right),
+                    .LessEqual => self.emitCmpLe(dest, left, right),
+                    .OrOr => self.emitOrOr(dest, left, right),
+                    .AndAnd => self.emitAndAnd(dest, left, right),
+                };
             },
         }
     }
@@ -391,41 +392,98 @@ pub const IRFunction = struct {
             if (block.id > 0) std.debug.print("{s}.{}:\n", .{ self.signature.name, block.id });
 
             for (block.instructions.items) |inst_id| {
-                const instruction = self.instruction_pool.items[inst_id];
+                var instruction = self.instruction_pool.items[inst_id];
 
                 std.debug.print("  ", .{});
 
                 switch (instruction) {
-                    .ret => |i| std.debug.print("ret t{}\n", .{i.value.id}),
-                    .@"const" => |i| std.debug.print("t{} = const {}\n", .{ i.dest.id, i.value }),
-                    .alloca => |i| std.debug.print("{s} = alloca\n", .{i.name}),
-                    .store => |i| std.debug.print("store t{} -> {s}\n", .{ i.src.id, i.dest }),
-                    .load => |i| std.debug.print("t{} <- load {s}\n", .{ i.dest.id, i.src }),
-                    .call => |i| {
-                        std.debug.print("t{} = call {s} ", .{ i.dest.id, i.name });
+                    .ret => |i| std.debug.print("ret t{}", .{i.id}),
+                    .@"const" => |*i| {
+                        std.debug.print("t{}:", .{i.dest.id});
+                        i.dest.ty.log();
+                        std.debug.print(" = const {}", .{i.value});
+                    },
+                    .alloca => |*i| {
+                        std.debug.print("{s} = alloca ", .{i.name});
+                        i.ty.log();
+                    },
+                    .store => |i| std.debug.print("store t{} -> {s}", .{ i.src.id, i.dest }),
+                    .load => |i| std.debug.print("t{} <- load {s}", .{ i.dest.id, i.src }),
+                    .call => |*i| {
+                        std.debug.print("t{}:", .{i.dest.id});
+                        i.dest.ty.log();
+                        std.debug.print(" = call {s} ", .{i.name});
 
                         for (i.args.items) |arg| {
                             std.debug.print("t{} ", .{arg.id});
                         }
-
-                        std.debug.print("\n", .{});
                     },
-                    .add => |i| std.debug.print("t{} = add t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
-                    .sub => |i| std.debug.print("t{} = sub t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
-                    .mul => |i| std.debug.print("t{} = mul t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
-                    .div => |i| std.debug.print("t{} = div t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
-                    .andand => |i| std.debug.print("t{} = and t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
-                    .oror => |i| std.debug.print("t{} = or t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
-                    .cmp_eq => |i| std.debug.print("t{} = cmp eq t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
-                    .cmp_ne => |i| std.debug.print("t{} = cmp ne t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
-                    .cmp_gt => |i| std.debug.print("t{} = cmp gt t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
-                    .cmp_lt => |i| std.debug.print("t{} = cmp lt t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
-                    .cmp_ge => |i| std.debug.print("t{} = cmp ge t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
-                    .cmp_le => |i| std.debug.print("t{} = cmp le t{} t{}\n", .{ i.dest.id, i.left.id, i.right.id }),
-                    .branch => |i| std.debug.print("br {s}.{}\n", .{ self.signature.name, i }),
-                    .branch_if => |i| std.debug.print("br t{} {s}.{} {s}.{}\n", .{ i.condition.id, self.signature.name, i.true_block, self.signature.name, i.false_block }),
-                    .dead => std.debug.print("(dead)\n", .{}),
+                    .add => |*i| {
+                        std.debug.print("t{}:", .{i.dest.id});
+                        i.dest.ty.log();
+                        std.debug.print(" = add t{} t{}", .{ i.left.id, i.right.id });
+                    },
+                    .sub => |*i| {
+                        std.debug.print("t{}:", .{i.dest.id});
+                        i.dest.ty.log();
+                        std.debug.print(" = sub t{} t{}", .{ i.left.id, i.right.id });
+                    },
+                    .mul => |*i| {
+                        std.debug.print("t{}:", .{i.dest.id});
+                        i.dest.ty.log();
+                        std.debug.print(" = mul t{} t{}", .{ i.left.id, i.right.id });
+                    },
+                    .div => |*i| {
+                        std.debug.print("t{}:", .{i.dest.id});
+                        i.dest.ty.log();
+                        std.debug.print(" = div t{} t{}", .{ i.left.id, i.right.id });
+                    },
+                    .andand => |*i| {
+                        std.debug.print("t{}:", .{i.dest.id});
+                        i.dest.ty.log();
+                        std.debug.print(" = and t{} t{}", .{ i.left.id, i.right.id });
+                    },
+                    .oror => |*i| {
+                        std.debug.print("t{}:", .{i.dest.id});
+                        i.dest.ty.log();
+                        std.debug.print(" = cmp or t{} t{}", .{ i.left.id, i.right.id });
+                    },
+                    .cmp_eq => |*i| {
+                        std.debug.print("t{}:", .{i.dest.id});
+                        i.dest.ty.log();
+                        std.debug.print(" = cmp eq t{} t{}", .{ i.left.id, i.right.id });
+                    },
+                    .cmp_ne => |*i| {
+                        std.debug.print("t{}:", .{i.dest.id});
+                        i.dest.ty.log();
+                        std.debug.print(" = cmp ne t{} t{}", .{ i.left.id, i.right.id });
+                    },
+                    .cmp_gt => |*i| {
+                        std.debug.print("t{}:", .{i.dest.id});
+                        i.dest.ty.log();
+                        std.debug.print(" = cmp gt t{} t{}", .{ i.left.id, i.right.id });
+                    },
+                    .cmp_lt => |*i| {
+                        std.debug.print("t{}:", .{i.dest.id});
+                        i.dest.ty.log();
+                        std.debug.print(" = cmp lt t{} t{}", .{ i.left.id, i.right.id });
+                    },
+                    .cmp_ge => |*i| {
+                        std.debug.print("t{}:", .{i.dest.id});
+                        i.dest.ty.log();
+                        std.debug.print(" = cmp ge t{} t{}", .{ i.left.id, i.right.id });
+                    },
+                    .cmp_le => |*i| {
+                        std.debug.print("t{}:", .{i.dest.id});
+                        i.dest.ty.log();
+                        std.debug.print(" = cmp le t{} t{}", .{ i.left.id, i.right.id });
+                    },
+                    .branch => |i| std.debug.print("br {s}.{}", .{ self.signature.name, i }),
+                    .branch_if => |i| std.debug.print("br t{} {s}.{} {s}.{}", .{ i.condition.id, self.signature.name, i.true_block, self.signature.name, i.false_block }),
+                    .dead => std.debug.print("(dead)", .{}),
                 }
+
+                std.debug.print("\n", .{});
             }
         }
     }
