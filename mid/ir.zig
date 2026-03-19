@@ -21,6 +21,7 @@ pub const Const = struct { dest: Temp, value: i64 }; // todo: add more literal t
 pub const Alloca = struct { name: []const u8, ty: Type };
 pub const Store = struct { dest: []const u8, src: Temp };
 pub const Load = struct { dest: Temp, src: []const u8 };
+pub const Param = struct { dest: Temp, src: []const u8, idx: usize };
 pub const Call = struct { dest: Temp, name: []const u8, args: std.ArrayList(Temp) = .empty }; // todo: function signature
 pub const BinaryOp = struct { dest: Temp, left: Temp, right: Temp };
 pub const BranchIf = struct { condition: Temp, true_block: usize, false_block: usize };
@@ -31,6 +32,7 @@ pub const Instruction = union(enum) {
     alloca: Alloca,
     store: Store,
     load: Load,
+    param: Param,
     call: Call,
     add: BinaryOp,
     sub: BinaryOp,
@@ -171,6 +173,11 @@ pub const IRFunction = struct {
         return dest;
     }
 
+    pub fn emitParam(self: *IRFunction, dest: Temp, src: []const u8, idx: usize) Temp {
+        self.appendInstruction(.{ .param = .{ .dest = dest, .src = src, .idx = idx } });
+        return dest;
+    }
+
     pub fn emitCall(self: *IRFunction, dest: Temp, name: []const u8, args: std.ArrayList(Temp)) Temp {
         self.appendInstruction(.{ .call = .{ .dest = dest, .name = name, .args = args } });
         return dest;
@@ -260,7 +267,21 @@ pub const IRFunction = struct {
     pub fn emitExpression(self: *IRFunction, expression: *Expression) Temp {
         switch (expression.kind) {
             .number_literal => |n| return self.emitConst(self.newTemp(expression.ty), n),
-            .identifier => |i| return self.emitLoad(self.newTemp(expression.ty), i),
+            .identifier => |i| {
+                var is_param = false;
+                var param_idx: usize = std.math.maxInt(usize);
+
+                for (self.signature.parameters.items, 0..) |param, idx| {
+                    if (std.mem.eql(u8, i, param.name)) {
+                        is_param = true;
+                        param_idx = idx;
+                        break;
+                    }
+                }
+
+                if (is_param) return self.emitParam(self.newTemp(expression.ty), i, param_idx);
+                return self.emitLoad(self.newTemp(expression.ty), i);
+            },
             .fn_call => |f| {
                 var tmps: std.ArrayList(Temp) = .empty;
                 for (f.args.items) |e| tmps.append(self.allocator, self.emitExpression(e)) catch unreachable;
@@ -407,8 +428,17 @@ pub const IRFunction = struct {
                         std.debug.print("{s} = alloca ", .{i.name});
                         i.ty.log();
                     },
-                    .store => |i| std.debug.print("store t{} -> {s}", .{ i.src.id, i.dest }),
-                    .load => |i| std.debug.print("t{} <- load {s}", .{ i.dest.id, i.src }),
+                    .store => |i| std.debug.print("{s} = store t{}", .{ i.dest, i.src.id }),
+                    .load => |*i| {
+                        std.debug.print("t{}:", .{i.dest.id});
+                        i.dest.ty.log();
+                        std.debug.print(" = load {s}", .{i.src});
+                    },
+                    .param => |*i| {
+                        std.debug.print("t{}:", .{i.dest.id});
+                        i.dest.ty.log();
+                        std.debug.print(" = param {s}", .{i.src});
+                    },
                     .call => |*i| {
                         std.debug.print("t{}:", .{i.dest.id});
                         i.dest.ty.log();

@@ -92,13 +92,6 @@ const Mem = union(enum) {
     }
 };
 
-const Operand = union(enum) {
-    imm: Imm,
-    reg: Reg,
-    addr: Addr,
-    mem: Mem,
-};
-
 const rr = struct {
     dest: Reg,
     src: Reg,
@@ -315,6 +308,11 @@ pub const LLIRFunction = struct {
         self.emitMOVrm(.{ .virtual = load.dest.id }, .{ .stack_slot = stack_slot.? });
     }
 
+    pub fn lowerParam(self: *LLIRFunction, param: IR.Param) void {
+        std.debug.assert(param.idx < IntPtrArgs.len);
+        self.emitMOVrr(.{ .virtual = param.dest.id }, IntPtrArgs[param.idx]);
+    }
+
     pub fn lowerCall(self: *LLIRFunction, call: IR.Call) void {
         // todo
         std.debug.assert(call.args.items.len <= IntPtrArgs.len);
@@ -439,6 +437,7 @@ pub const LLIRFunction = struct {
                     .alloca => |inst| self.lowerAlloca(inst),
                     .store => |inst| self.lowerStore(inst),
                     .load => |inst| self.lowerLoad(inst),
+                    .param => |inst| self.lowerParam(inst),
                     .call => |inst| self.lowerCall(inst),
                     .add => |inst| self.lowerAdd(inst),
                     .sub => |inst| self.lowerSub(inst),
